@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+backend.log
+firebase-key.json
+deploy_firebase.py
