@@ -132,6 +132,15 @@ def _run_async(coro):
         loop.close()
 
 
+def _run_async_all(*coros):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(asyncio.gather(*coros))
+    finally:
+        loop.close()
+
+
 def _float(val):
     if not val or val in ("-", ""):
         return 0.0
@@ -151,11 +160,55 @@ def _days(d1, d2):
     return ",".join(str(i) for i in range(d1, d2 + 1))
 
 
+def _set_extra(compradores, departamentos, secoes):
+    """Monta condições extras para o set analysis do Qlik."""
+    parts = []
+    if compradores:
+        vals = ",".join("'" + v + "'" for v in compradores)
+        parts.append("Comprador={" + vals + "}")
+    if departamentos:
+        vals = ",".join("'" + v + "'" for v in departamentos)
+        parts.append("[Nível 1]={" + vals + "}")
+    if secoes:
+        vals = ",".join("'" + v + "'" for v in secoes)
+        parts.append("[Nível 2]={" + vals + "}")
+    return ("," + ",".join(parts)) if parts else ""
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok", "tenant": TENANT, "api_key": bool(API_KEY)})
+
+
+@app.route("/api/filtros")
+def api_filtros():
+    """Retorna opções dos filtros: compradores, departamentos, seções."""
+    cache_key = "__filtros__"
+    cached = _cache.get(cache_key)
+    if cached:
+        ts, payload = cached
+        if time.time() - ts < 3600:   # cache de 1 hora
+            return jsonify(payload)
+    try:
+        comp_raw, dept_raw, sec_raw = _run_async_all(
+            _hypercube(APP_FAROL, ["Comprador"], [], rows=100),
+            _hypercube(APP_FAROL, ["Nível 1"],   [], rows=20),
+            _hypercube(APP_FAROL, ["Nível 2"],   [], rows=50),
+        )
+        compradores   = sorted([r["Comprador"].strip() for r in comp_raw
+                                if r.get("Comprador","").strip()
+                                and r.get("Comprador") != "<Não Identificado>"])
+        departamentos = sorted([r["Nível 1"].strip() for r in dept_raw
+                                if r.get("Nível 1","").strip()])
+        secoes        = sorted([r["Nível 2"].strip() for r in sec_raw
+                                if r.get("Nível 2","").strip()])
+        payload = {"compradores": compradores, "departamentos": departamentos, "secoes": secoes}
+        _cache[cache_key] = (time.time(), payload)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/vendas", methods=["POST"])
@@ -174,14 +227,19 @@ def api_vendas():
     mes      = int(body.get("mes", datetime.now().month))
     dia_ini  = int(body.get("dia_ini", 1))
     dia_fim  = int(body.get("dia_fim", datetime.now().day - 1))
-    empresas = body.get("empresas", [])   # lista de nomes de empresa
-    bandeiras= body.get("bandeiras", [])  # ["BIG BOX","ULT"]
+    empresas      = body.get("empresas", [])
+    bandeiras     = body.get("bandeiras", [])
+    compradores_f = body.get("compradores", [])
+    departamentos = body.get("departamentos", [])
+    secoes        = body.get("secoes", [])
 
     if dia_ini > dia_fim:
         dia_ini, dia_fim = dia_fim, dia_ini
 
     # Cache lookup
-    cache_key = f"{ano}-{mes}-{dia_ini}-{dia_fim}-{sorted(empresas)}-{sorted(bandeiras)}"
+    cache_key = (f"{ano}-{mes}-{dia_ini}-{dia_fim}"
+                 f"-{sorted(empresas)}-{sorted(bandeiras)}"
+                 f"-{sorted(compradores_f)}-{sorted(departamentos)}-{sorted(secoes)}")
     cached = _cache.get(cache_key)
     if cached:
         ts, payload = cached
@@ -189,34 +247,22 @@ def api_vendas():
             return jsonify(payload)
 
     ma      = _mes_ano(ano, mes)
-    ma_aa   = _mes_ano(ano - 1, mes)   # ano anterior
+    ma_aa   = _mes_ano(ano - 1, mes)
     days    = _days(dia_ini, dia_fim)
-    days_aa = days  # mesmos dias no ano anterior
+    days_aa = days
 
-    # Filtro de empresa via set analysis
-    def emp_filter(extra=""):
-        parts = [f"FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra}"]
-        return parts[0]
+    xtra = _set_extra(compradores_f, departamentos, secoes)
 
-    def meta_filter(extra=""):
-        return f"FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra}"
-
-    # Expressões globais (sem filtro de empresa — por loja)
-    V_ACUM  = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
-    M_ACUM  = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
-    # Ano anterior (mesmos dias)
-    V_AA    = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}>}} #Medida1)"
-    # Meta mês completo (para Prog. ML%)
-    M_MES   = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}>}} #Medida1)"
-    # Clientes (NFs distintas)
-    NRO_CL  = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} Distinct ChaveNF)"
-    NRO_CL_AA = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}>}} Distinct ChaveNF)"
-    # Margem PDV
-    MRG_PDV = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida2)"
-    M_MRG   = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida2)"
-    # Quebra
-    QUEBRA  = f"Sum({{<FlagFatosQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
-    M_QUEBRA= f"Sum({{<FlagFatosMetasQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
+    V_ACUM    = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
+    M_ACUM    = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
+    V_AA      = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}{xtra}>}} #Medida1)"
+    M_MES     = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{xtra}>}} #Medida1)"
+    NRO_CL    = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} Distinct ChaveNF)"
+    NRO_CL_AA = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}{xtra}>}} Distinct ChaveNF)"
+    MRG_PDV   = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida2)"
+    M_MRG     = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida2)"
+    QUEBRA    = f"Sum({{<FlagFatosQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
+    M_QUEBRA  = f"Sum({{<FlagFatosMetasQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
 
     dias_passados = dia_fim - dia_ini + 1
     try:
