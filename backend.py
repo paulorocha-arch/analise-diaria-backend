@@ -295,6 +295,45 @@ def api_filtros():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Leitura das coleções farol_* do Firestore ────────────────────────────────
+
+def _ler_farol(colecao: str, ano: int, mes: int, dia_ini: int, dia_fim: int) -> list:
+    """
+    Lê todos os documentos de um período da coleção farol_*.
+    Usa batch get (2 round-trips independente do nº de dias).
+    """
+    if not FIREBASE_OK:
+        return []
+
+    # 1) Lê o índice de cada dia para saber quantos lotes existem
+    idx_refs = [
+        _db.collection(f"{colecao}_index").document(f"{ano}_{mes:02d}_{dia:02d}")
+        for dia in range(dia_ini, dia_fim + 1)
+    ]
+    idx_docs = list(_db.get_all(idx_refs))
+
+    # 2) Monta lista de refs dos documentos de dados
+    data_refs = []
+    for doc in idx_docs:
+        if not doc.exists:
+            continue
+        n = doc.to_dict().get("total_batches", 1)
+        for b in range(n):
+            data_refs.append(
+                _db.collection(colecao).document(f"{doc.id}_b{b:02d}")
+            )
+
+    if not data_refs:
+        return []
+
+    # 3) Lê todos os documentos de dados de uma vez
+    rows = []
+    for doc in _db.get_all(data_refs):
+        if doc.exists:
+            rows.extend(doc.to_dict().get("rows", []))
+    return rows
+
+
 @app.route("/api/vendas", methods=["POST"])
 def api_vendas():
     body          = request.json or {}
@@ -302,16 +341,21 @@ def api_vendas():
     mes           = int(body.get("mes",  datetime.now().month))
     dia_ini       = int(body.get("dia_ini", 1))
     dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
-    empresas      = body.get("empresas", [])
-    bandeiras     = body.get("bandeiras", [])
-    compradores_f = body.get("compradores", [])
-    departamentos = body.get("departamentos", [])
-    secoes        = body.get("secoes", [])
+    empresas      = set(body.get("empresas", []))
+    bandeiras     = set(body.get("bandeiras", []))
+    compradores_f = set(body.get("compradores", []))
+    departamentos = set(body.get("departamentos", []))
+    secoes        = set(body.get("secoes", []))
 
     if dia_ini > dia_fim:
         dia_ini, dia_fim = dia_fim, dia_ini
 
-    params = {
+    from calendar import monthrange
+    dias_passados = dia_fim - dia_ini + 1
+    dias_no_mes   = monthrange(ano, mes)[1]
+
+    # ── Cache em memória ────────────────────────────────────────────────────
+    params  = {
         "ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
         "empresas": sorted(empresas), "bandeiras": sorted(bandeiras),
         "compradores": sorted(compradores_f),
@@ -319,151 +363,139 @@ def api_vendas():
         "secoes": sorted(secoes),
     }
     mem_key = json.dumps(params, sort_keys=True)
-    fs_doc  = _fs_key(params)
-
-    # 1. Cache em memória (mais rápido)
     mem = _mem_get(mem_key)
     if mem:
         return jsonify(mem)
 
-    # 2. Firestore (persiste entre reinicializações do Render)
-    fs_data = _fs_get(fs_doc)
-    if fs_data:
-        _mem_set(mem_key, fs_data)
-        return jsonify(fs_data)
-
-    # 3. Consulta Qlik
-    ma      = _mes_ano(ano, mes)
-    ma_aa   = _mes_ano(ano - 1, mes)
-    days    = _days(dia_ini, dia_fim)
-    days_aa = days
-    xtra    = _set_extra(compradores_f, departamentos, secoes)
-
-    V_ACUM    = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
-    M_ACUM    = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
-    V_AA      = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}{xtra}>}} #Medida1)"
-    M_MES     = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{xtra}>}} #Medida1)"
-    NRO_CL    = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} Distinct ChaveNF)"
-    NRO_CL_AA = f"Count({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_aa}'}},Dia={{{days_aa}}}{xtra}>}} Distinct ChaveNF)"
-    MRG_PDV   = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida2)"
-    M_MRG     = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida2)"
-    QUEBRA    = f"Sum({{<FlagFatosQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
-    M_QUEBRA  = f"Sum({{<FlagFatosMetasQuebras={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}>}} #Medida1)"
-
-    dias_passados = dia_fim - dia_ini + 1
+    # ── Leitura do Firestore (farol_granular + farol_meta) ──────────────────
     try:
-        from calendar import monthrange
-        dias_no_mes = monthrange(ano, mes)[1]
-    except Exception:
-        dias_no_mes = 30
-
-    try:
-        raw = _run_async(_hypercube(
-            APP_FAROL,
-            ["Empresa"],
-            [V_ACUM, M_ACUM, V_AA, M_MES, NRO_CL, NRO_CL_AA, MRG_PDV, M_MRG, QUEBRA, M_QUEBRA],
-            rows=60,
-        ))
+        rows_v = _ler_farol("farol_granular", ano, mes, dia_ini, dia_fim)
+        rows_m = _ler_farol("farol_meta",     ano, mes, dia_ini, dia_fim)
+        # Meta do mês completo (para Prog. de Venda %)
+        rows_m_mes = _ler_farol("farol_meta", ano, mes, 1, dias_no_mes)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Firestore: {e}"}), 500
 
+    if not rows_v:
+        return jsonify({"error": "Sem dados no banco para o período selecionado. Execute sync_farol.py para sincronizar."}), 404
+
+    # ── Aplicar filtros sobre os dados granulares ───────────────────────────
+    if bandeiras:
+        rows_v = [r for r in rows_v if r.get("bandeira") in bandeiras]
+        rows_m = [r for r in rows_m if r.get("bandeira") in bandeiras]
+    if empresas:
+        rows_v = [r for r in rows_v if r.get("empresa") in empresas]
+        rows_m = [r for r in rows_m if r.get("empresa") in empresas]
+    if compradores_f:
+        rows_v = [r for r in rows_v if r.get("comprador") in compradores_f]
+    if departamentos:
+        rows_v = [r for r in rows_v if r.get("departamento") in departamentos]
+    if secoes:
+        rows_v = [r for r in rows_v if r.get("secao") in secoes]
+
+    # ── Agregar por empresa ─────────────────────────────────────────────────
+    from collections import defaultdict
+
+    agg_v = defaultdict(lambda: {"venda": 0.0, "margem_pdv": 0.0, "nro_clientes": 0, "bandeira": ""})
+    for r in rows_v:
+        emp = r["empresa"]
+        agg_v[emp]["venda"]        += r.get("venda", 0)
+        agg_v[emp]["margem_pdv"]   += r.get("margem_pdv", 0)
+        agg_v[emp]["nro_clientes"] += r.get("nro_clientes", 0)
+        agg_v[emp]["bandeira"]      = r.get("bandeira", "")
+
+    # Meta do período
+    agg_m = defaultdict(lambda: {"meta_venda": 0.0, "meta_margem": 0.0})
+    for r in rows_m:
+        emp = r["empresa"]
+        agg_m[emp]["meta_venda"]  += r.get("meta_venda", 0)
+        agg_m[emp]["meta_margem"] += r.get("meta_margem", 0)
+
+    # Meta do mês completo (para Prog. de Venda %)
+    agg_m_mes = defaultdict(float)
+    for r in rows_m_mes:
+        if bandeiras and r.get("bandeira") not in bandeiras:
+            continue
+        if empresas and r.get("empresa") not in empresas:
+            continue
+        agg_m_mes[r["empresa"]] += r.get("meta_venda", 0)
+
+    # ── Montar linhas de saída ──────────────────────────────────────────────
     rows_out = []
-    for row in raw:
-        empresa = row.get("Empresa", "").strip()
-        if not empresa or empresa == "-":
-            continue
-        bandeira = "BIG BOX" if empresa.upper().startswith("BIG") else "ULT"
-        if bandeiras and bandeira not in bandeiras:
-            continue
-        if empresas and empresa not in empresas:
-            continue
+    for emp, v in sorted(agg_v.items()):
+        va    = round(v["venda"],      2)
+        mrg   = round(v["margem_pdv"], 2)
+        nc    = v["nro_clientes"]
+        bnd   = v["bandeira"]
+        ma_v  = round(agg_m[emp]["meta_venda"],  2)
+        m_mrg = round(agg_m[emp]["meta_margem"], 2)
+        m_mes = agg_m_mes.get(emp, 0)
+        tm    = round(va / nc, 2) if nc > 0 else 0
 
-        va    = _float(row.get(V_ACUM))
-        ma_v  = _float(row.get(M_ACUM))
-        v_aa  = _float(row.get(V_AA))
-        m_mes = _float(row.get(M_MES))
-        nc    = _float(row.get(NRO_CL))
-        nc_aa = _float(row.get(NRO_CL_AA))
-        mrg   = _float(row.get(MRG_PDV))
-        m_mrg = _float(row.get(M_MRG))
-        qbr   = _float(row.get(QUEBRA))
-        m_qbr = _float(row.get(M_QUEBRA))
-
-        tm    = round(va / nc,     2) if nc    > 0 else 0
-        tm_aa = round(v_aa / nc_aa,2) if nc_aa > 0 else 0
-
-        prog_venda = round((va / dias_passados * dias_no_mes / m_mes * 100)   if m_mes > 0 and dias_passados > 0 else 0, 2)
-        prog_cl    = round((nc / dias_passados * dias_no_mes / (nc_aa or 1) * 100 - 100) if dias_passados > 0 else 0, 2)
-        prog_tm    = round(((tm / tm_aa - 1) * 100)   if tm_aa > 0 else 0, 2)
-        cresc_cl   = round(((nc / nc_aa - 1) * 100)   if nc_aa > 0 else 0, 2)
-        cresc_tm   = round(((tm / tm_aa - 1) * 100)   if tm_aa > 0 else 0, 2)
-        ating      = round((va / ma_v * 100)           if ma_v  > 0 else 0, 2)
-        ating_mrg  = round((mrg / m_mrg * 100)         if m_mrg > 0 else 0, 2)
+        ating     = round(va / ma_v * 100,   2) if ma_v  > 0 else 0
+        ating_mrg = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
+        prog_venda = round(va / dias_passados * dias_no_mes / m_mes * 100, 2) \
+                     if m_mes > 0 and dias_passados > 0 else 0
 
         rows_out.append({
-            "empresa": empresa, "bandeira": bandeira,
-            "meta_venda":    round(ma_v, 2),
-            "venda":         round(va, 2),
-            "desvio":        round(va - ma_v, 2),
-            "nro_clientes":  int(nc),
-            "prog_cl_ml":    prog_cl,
-            "ticket_medio":  tm,
-            "prog_tm_ml":    prog_tm,
+            "empresa":      emp,
+            "bandeira":     bnd,
+            "meta_venda":   ma_v,
+            "venda":        va,
+            "desvio":       round(va - ma_v, 2),
+            "nro_clientes": nc,
+            "prog_cl_ml":   0,
+            "ticket_medio": tm,
+            "prog_tm_ml":   0,
             "prog_venda_ml": prog_venda,
-            "ating":         ating,
-            "cresc_cl":      cresc_cl,
-            "cresc_tm":      cresc_tm,
-            "margem_pdv":    round(mrg, 2),
-            "meta_margem":   round(m_mrg, 2),
-            "ating_margem":  ating_mrg,
-            "quebra":        round(qbr, 2),
-            "meta_quebra":   round(m_qbr, 2),
+            "ating":        ating,
+            "cresc_cl":     0,
+            "cresc_tm":     0,
+            "margem_pdv":   mrg,
+            "meta_margem":  m_mrg,
+            "ating_margem": ating_mrg,
+            "quebra":       0,
+            "meta_quebra":  0,
         })
 
-    rows_out.sort(key=lambda x: x["empresa"])
+    # ── Totais ──────────────────────────────────────────────────────────────
+    def _s(k):  return round(sum(r[k] for r in rows_out), 2)
+    def _si(k): return sum(r[k] for r in rows_out)
 
-    def _sum(k):    return round(sum(r[k] for r in rows_out), 2)
-    def _sumint(k): return sum(r[k] for r in rows_out)
-
-    tot_va   = _sum("venda")
-    tot_ma   = _sum("meta_venda")
-    tot_nc   = _sumint("nro_clientes")
-    tot_mrg  = _sum("margem_pdv")
-    tot_mmrg = _sum("meta_margem")
-    tot_qbr  = _sum("quebra")
-    tot_mqbr = _sum("meta_quebra")
+    tot_va   = _s("venda")
+    tot_ma   = _s("meta_venda")
+    tot_nc   = _si("nro_clientes")
+    tot_mrg  = _s("margem_pdv")
+    tot_mmrg = _s("meta_margem")
     tot_tm   = round(tot_va / tot_nc, 2) if tot_nc > 0 else 0
+    tot_mmes = sum(agg_m_mes.values())
 
     totais = {
-        "empresa": "TOTAIS", "bandeira": "",
-        "meta_venda":    tot_ma,
         "venda":         tot_va,
+        "meta_venda":    tot_ma,
         "desvio":        round(tot_va - tot_ma, 2),
         "nro_clientes":  tot_nc,
         "ticket_medio":  tot_tm,
-        "prog_cl_ml":    0,
-        "prog_tm_ml":    0,
-        "prog_venda_ml": round((tot_va / dias_passados * dias_no_mes / tot_ma * 100) if tot_ma > 0 and dias_passados > 0 else 0, 2),
-        "ating":         round((tot_va / tot_ma * 100) if tot_ma > 0 else 0, 2),
-        "cresc_cl":      0, "cresc_tm":      0,
         "margem_pdv":    tot_mrg,
         "meta_margem":   tot_mmrg,
-        "ating_margem":  round((tot_mrg / tot_mmrg * 100) if tot_mmrg > 0 else 0, 2),
-        "quebra":        tot_qbr,
-        "meta_quebra":   tot_mqbr,
+        "quebra":        0,
+        "meta_quebra":   0,
+        "ating":         round(tot_va / tot_ma * 100, 2) if tot_ma > 0 else 0,
+        "ating_margem":  round(tot_mrg / tot_mmrg * 100, 2) if tot_mmrg > 0 else 0,
+        "prog_venda_ml": round(tot_va / dias_passados * dias_no_mes / tot_mmes * 100, 2)
+                         if tot_mmes > 0 and dias_passados > 0 else 0,
+        "cresc_cl": 0, "cresc_tm": 0,
     }
 
     payload = {
+        "fonte": "firestore",
         "filtros": {"ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
                     "dias_passados": dias_passados, "dias_no_mes": dias_no_mes},
-        "totais":  totais,
-        "data":    rows_out,
+        "totais": totais,
+        "data":   rows_out,
     }
 
-    # Salva no Firestore e memória
-    _fs_set(fs_doc, payload, meta=params)
     _mem_set(mem_key, payload)
-
     return jsonify(payload)
 
 
