@@ -32,6 +32,10 @@ APP_FAROL = "bd053bfe-11b0-4f35-ab25-d316e23f8977"
 app = Flask(__name__)
 CORS(app, origins="*")
 
+# Cache em memória: {cache_key: (timestamp, result)}
+_cache = {}
+_CACHE_TTL = 300  # 5 minutos
+
 # ── Helpers Qlik Engine API ──────────────────────────────────────────────────
 
 async def _engine_session(app_id, callback):
@@ -175,6 +179,14 @@ def api_vendas():
 
     if dia_ini > dia_fim:
         dia_ini, dia_fim = dia_fim, dia_ini
+
+    # Cache lookup
+    cache_key = f"{ano}-{mes}-{dia_ini}-{dia_fim}-{sorted(empresas)}-{sorted(bandeiras)}"
+    cached = _cache.get(cache_key)
+    if cached:
+        ts, payload = cached
+        if time.time() - ts < _CACHE_TTL:
+            return jsonify(payload)
 
     ma      = _mes_ano(ano, mes)
     ma_aa   = _mes_ano(ano - 1, mes)   # ano anterior
@@ -323,12 +335,14 @@ def api_vendas():
         "meta_quebra":   tot_mqbr,
     }
 
-    return jsonify({
+    payload = {
         "filtros": {"ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
                     "dias_passados": dias_passados, "dias_no_mes": dias_no_mes},
         "totais":  totais,
         "data":    rows_out,
-    })
+    }
+    _cache[cache_key] = (time.time(), payload)
+    return jsonify(payload)
 
 
 if __name__ == "__main__":
