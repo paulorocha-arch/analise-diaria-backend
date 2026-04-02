@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Análise Diária</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #F4F6F9;
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* ═══════════════════════════════════════
+       SIDEBAR
+    ═══════════════════════════════════════ */
+    .sidebar {
+      width: 230px;
+      min-height: 100vh;
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 100;
+      box-shadow: 3px 0 12px rgba(0,0,0,0.15);
+    }
+
+    .sidebar-logo {
+      padding: 22px 20px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+
+    .sidebar-logo .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #2980b9, #1a5f7a);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sidebar-logo .logo-icon svg {
+      width: 20px; height: 20px;
+      fill: none; stroke: #fff; stroke-width: 1.8;
+    }
+
+    .sidebar-logo .logo-text {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+
+    .sidebar-logo .logo-text span {
+      display: block;
+      font-size: 11px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.45);
+    }
+
+    .sidebar-section {
+      padding: 18px 12px 6px;
+    }
+
+    .sidebar-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.3);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 0 8px;
+      margin-bottom: 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: rgba(255,255,255,0.6);
+      font-size: 13.5px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background .15s, color .15s;
+      margin-bottom: 2px;
+      user-select: none;
+    }
+
+    .nav-item svg {
+      width: 18px; height: 18px;
+      flex-shrink: 0;
+      opacity: 0.7;
+      transition: opacity .15s;
+    }
+
+    .nav-item:hover {
+      background: rgba(255,255,255,0.07);
+      color: #fff;
+    }
+
+    .nav-item:hover svg { opacity: 1; }
+
+    .nav-item.active {
+      background: linear-gradient(135deg, rgba(41,128,185,0.35), rgba(26,95,122,0.35));
+      color: #ffffff;
+      border-left: 3px solid #2980b9;
+    }
+
+    .nav-item.active svg { opacity: 1; }
+
+    .sidebar-spacer { flex: 1; }
+
+    .sidebar-bottom {
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .user-area {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+
+    .user-area:hover { background: rgba(255,255,255,0.07); }
+
+    .user-avatar {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #2980b9, #1a5f7a);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+
+    .user-info { flex: 1; min-width: 0; }
+    .user-name  { font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-role  { font-size: 11px; color: rgba(255,255,255,0.4); }
+
+    .btn-logout {
+      background: none; border: none; cursor: pointer;
+      color: rgba(255,255,255,0.35); padding: 4px;
+      display: flex; align-items: center;
+      transition: color .15s;
+    }
+    .btn-logout:hover { color: #e74c3c; }
+    .btn-logout svg { width: 16px; height: 16px; }
+
+    /* ═══════════════════════════════════════
+       MAIN AREA
+    ═══════════════════════════════════════ */
+    .main {
+      margin-left: 230px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* Topbar */
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #e8e8e8;
+      padding: 0 28px;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 50;
+    }
+
+    .topbar-left h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .topbar-left .breadcrumb {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 1px;
+    }
+
+    .topbar-right {
+      display: flex; align-items: center; gap: 16px;
+    }
+
+    .topbar-date {
+      font-size: 12px;
+      color: #666;
+      background: #F4F6F9;
+      padding: 5px 12px;
+      border-radius: 20px;
+    }
+
+    /* Content */
+    .content {
+      padding: 28px;
+      flex: 1;
+      overflow-x: hidden;
+    }
+
+    /* ═══════════════════════════════════════
+       RESPONSIVO
+    ═══════════════════════════════════════ */
+
+    /* Telas grandes (>1400px): sidebar um pouco maior */
+    @media (min-width: 1400px) {
+      .sidebar { width: 250px; }
+      .main    { margin-left: 250px; }
+      .modules-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    }
+
+    /* Telas médias (900px–1199px): sidebar mais compacta */
+    @media (max-width: 1199px) {
+      .sidebar { width: 200px; }
+      .main    { margin-left: 200px; }
+      .sidebar-logo .logo-text { font-size: 13px; }
+      .nav-item { font-size: 12.5px; padding: 9px 10px; }
+      .modules-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+      .content { padding: 20px; }
+    }
+
+    /* Telas pequenas (600px–899px): sidebar só ícones */
+    @media (max-width: 899px) {
+      .sidebar {
+        width: 64px;
+        overflow: hidden;
+      }
+      .main { margin-left: 64px; }
+      .sidebar-logo .logo-text,
+      .sidebar-section-label,
+      .nav-item span,
+      .user-info,
+      .btn-logout { display: none; }
+      .nav-item { justify-content: center; padding: 12px 0; }
+      .nav-item svg { width: 20px; height: 20px; margin: 0; }
+      .sidebar-logo { justify-content: center; padding: 18px 0; }
+      .user-avatar { margin: 0 auto; }
+      .user-area { justify-content: center; padding: 10px 0; }
+      .modules-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+      .welcome-banner { flex-direction: column; gap: 10px; }
+      .content { padding: 16px; }
+      .topbar { padding: 0 16px; }
+    }
+
+    /* Mobile (<599px) */
+    @media (max-width: 599px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; }
+      .modules-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+      .module-card { padding: 16px 14px; }
+      .topbar { height: 50px; }
+      .topbar-date { display: none; }
+      .content { padding: 12px; }
+      .welcome-banner { padding: 18px; }
+      .welcome-text h2 { font-size: 17px; }
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 16px;
+    }
+
+    /* Cards de módulos */
+    .modules-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 18px;
+      margin-bottom: 36px;
+    }
+
+    .module-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 24px 22px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+      cursor: pointer;
+      transition: transform .18s, box-shadow .18s;
+      border-top: 5px solid transparent;
+      text-decoration: none;
+      display: block;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .module-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.16);
+    }
+
+    .module-card.vendas   { border-top-color: #2980b9; box-shadow: 0 4px 16px rgba(41,128,185,0.18); }
+    .module-card.margem   { border-top-color: #27ae60; box-shadow: 0 4px 16px rgba(39,174,96,0.18); }
+    .module-card.quebra   { border-top-color: #e74c3c; box-shadow: 0 4px 16px rgba(231,76,60,0.18); }
+    .module-card.prod-neg { border-top-color: #e67e22; box-shadow: 0 4px 16px rgba(230,126,34,0.18); }
+    .module-card.trocas      { border-top-color: #9b59b6; box-shadow: 0 4px 16px rgba(155,89,182,0.18); }
+    .module-card.meta-diaria { border-top-color: #16a085; box-shadow: 0 4px 16px rgba(22,160,133,0.18); }
+    .module-card.config      { border-top-color: #7f8c8d; box-shadow: 0 4px 16px rgba(127,140,141,0.18); }
+
+    .module-card.vendas:hover   { box-shadow: 0 12px 32px rgba(41,128,185,0.30); }
+    .module-card.margem:hover   { box-shadow: 0 12px 32px rgba(39,174,96,0.30); }
+    .module-card.quebra:hover   { box-shadow: 0 12px 32px rgba(231,76,60,0.30); }
+    .module-card.prod-neg:hover { box-shadow: 0 12px 32px rgba(230,126,34,0.30); }
+    .module-card.trocas:hover      { box-shadow: 0 12px 32px rgba(155,89,182,0.30); }
+    .module-card.meta-diaria:hover { box-shadow: 0 12px 32px rgba(22,160,133,0.30); }
+    .module-card.config:hover      { box-shadow: 0 12px 32px rgba(127,140,141,0.30); }
+
+    .module-icon {
+      width: 50px; height: 50px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .module-icon svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 1.8; }
+
+    .module-card.vendas   .module-icon { background: linear-gradient(135deg,#3498db,#1a6fa8); box-shadow: 0 4px 12px rgba(41,128,185,0.45); }
+    .module-card.margem   .module-icon { background: linear-gradient(135deg,#2ecc71,#1a9950); box-shadow: 0 4px 12px rgba(39,174,96,0.45); }
+    .module-card.quebra   .module-icon { background: linear-gradient(135deg,#e74c3c,#c0392b); box-shadow: 0 4px 12px rgba(231,76,60,0.45); }
+    .module-card.prod-neg .module-icon { background: linear-gradient(135deg,#f39c12,#d68910); box-shadow: 0 4px 12px rgba(230,126,34,0.45); }
+    .module-card.trocas      .module-icon { background: linear-gradient(135deg,#9b59b6,#7d3c98); box-shadow: 0 4px 12px rgba(155,89,182,0.45); }
+    .module-card.meta-diaria .module-icon { background: linear-gradient(135deg,#1abc9c,#16a085); box-shadow: 0 4px 12px rgba(22,160,133,0.45); }
+    .module-card.config      .module-icon { background: linear-gradient(135deg,#95a5a6,#7f8c8d); box-shadow: 0 4px 12px rgba(127,140,141,0.45); }
+
+    .module-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 6px;
+    }
+
+    .module-desc {
+      font-size: 12px;
+      color: #777;
+      line-height: 1.5;
+    }
+
+    .module-arrow {
+      position: absolute;
+      bottom: 18px; right: 18px;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: #F4F6F9;
+      display: flex; align-items: center; justify-content: center;
+      color: #bbb;
+      transition: background .15s, color .15s;
+    }
+
+    .module-card:hover .module-arrow {
+      background: #e8f0fe;
+      color: #2980b9;
+    }
+
+    .module-arrow svg { width: 14px; height: 14px; }
+
+    /* Card em breve */
+    .module-card.soon {
+      opacity: 0.55;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .badge-soon {
+      position: absolute;
+      top: 14px; right: 14px;
+      background: #F4F6F9;
+      color: #aaa;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Boas-vindas */
+    .welcome-banner {
+      background: linear-gradient(135deg, #1a1a2e, #2980b9);
+      border-radius: 14px;
+      padding: 24px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      color: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .welcome-banner::after {
+      content: '';
+      position: absolute;
+      right: -30px; top: -30px;
+      width: 180px; height: 180px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 50%;
+    }
+
+    .welcome-banner::before {
+      content: '';
+      position: absolute;
+      right: 60px; bottom: -50px;
+      width: 130px; height: 130px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 50%;
+    }
+
+    .welcome-text h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .welcome-text p {
+      font-size: 13px;
+      color: rgba(255,255,255,0.65);
+    }
+
+    .welcome-date {
+      text-align: right;
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      position: relative; z-index: 1;
+    }
+
+    .welcome-date .day {
+      font-size: 36px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════
+     SIDEBAR FIXA
+═══════════════════════════════════════ -->
+<nav class="sidebar">
+
+  <div class="sidebar-logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5l4-4 4 4 4-6 4 3"/>
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+    </div>
+    <div class="logo-text">
+      Análise Diária
+      <span>Painel de Resultados</span>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Módulos</div>
+
+    <a class="nav-item active" href="dashboard.html" data-page="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+      </svg>
+      Catálogo
+    </a>
+
+    <a class="nav-item" href="vendas.html" data-page="vendas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5l4-4 4 4 4-6 4 3"/>
+        <path stroke-linecap="round" d="M3 20h18"/>
+      </svg>
+      Vendas
+    </a>
+
+    <a class="nav-item" href="margem.html" data-page="margem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+      </svg>
+      Margem
+    </a>
+
+    <a class="nav-item" href="quebra.html" data-page="quebra">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      </svg>
+      Quebra
+    </a>
+
+    <a class="nav-item" href="produto-negativo.html" data-page="prod-neg">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="10"/>
+        <path stroke-linecap="round" d="M8 12h8"/>
+      </svg>
+      Produto Negativo
+    </a>
+
+    <a class="nav-item" href="trocas.html" data-page="trocas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/>
+      </svg>
+      Trocas
+    </a>
+  </div>
+
+  <div class="sidebar-section" style="padding-top:10px">
+    <div class="sidebar-section-label">Metas de Venda</div>
+    <a class="nav-item" href="lanc-meta-diaria.html" data-page="lanc-meta">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M17.586 3.586a2 2 0 112.828 2.828L12 15l-4 1 1-4 8.586-8.414z"/>
+      </svg>
+      Lanç. Meta Diária
+    </a>
+  </div>
+
+  <div class="sidebar-spacer"></div>
+
+  <div class="sidebar-section" style="padding-bottom:4px">
+    <div class="sidebar-section-label">Sistema</div>
+    <a class="nav-item" href="configuracao.html" data-page="config">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="3"/>
+        <path stroke-linecap="round" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+      </svg>
+      Configuração
+    </a>
+  </div>
+
+  <div class="sidebar-bottom">
+    <div class="user-area">
+      <div class="user-avatar" id="user-avatar">P</div>
+      <div class="user-info">
+        <div class="user-name" id="user-name">Carregando…</div>
+        <div class="user-role">Administrador</div>
+      </div>
+      <button class="btn-logout" id="btn-logout" title="Sair">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path stroke-linecap="round" d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+</nav>
+
+<!-- ═══════════════════════════════════════
+     ÁREA PRINCIPAL
+═══════════════════════════════════════ -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>Catálogo</h1>
+      <div class="breadcrumb">Página inicial · Opções de módulos de acesso</div>    </div>
+    <div class="topbar-right">
+      <div class="topbar-date" id="topbar-date">
+        <span style="color:#aaa;margin-right:4px;">&#128337;</span>
+        <span id="last-sync-label">Verificando última atualização…</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- Banner boas-vindas -->
+    <div class="welcome-banner">
+      <div class="welcome-text">
+        <h2 id="welcome-msg">Olá, Paulo!</h2>
+        <p>Bem-vindo ao painel de análise diária. Escolha um módulo abaixo.</p>
+      </div>
+      <div class="welcome-date">
+        <span class="day" id="welcome-day">—</span>
+        <span id="welcome-month">—</span>
+      </div>
+    </div>
+
+    <!-- Módulos analíticos -->
+    <div class="section-title">Módulos disponíveis</div>
+    <div class="modules-grid">
+
+      <a class="module-card vendas" href="vendas.html">
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5l4-4 4 4 4-6 4 3"/><path stroke-linecap="round" d="M3 20h18"/></svg>
+        </div>
+        <div class="module-name">Vendas</div>
+        <div class="module-desc">Acompanhe resultados diários, acumulados e atingimento de metas por loja.</div>
+        <div class="module-arrow">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </div>
+      </a>
+
+      <a class="module-card margem soon" href="#">
+        <div class="badge-soon">Em breve</div>
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div class="module-name">Margem</div>
+        <div class="module-desc">Análise de margem bruta e líquida por produto, seção e departamento.</div>
+      </a>
+
+      <a class="module-card quebra soon" href="#">
+        <div class="badge-soon">Em breve</div>
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M8 12h8"/></svg>
+        </div>
+        <div class="module-name">Quebra</div>
+        <div class="module-desc">Monitoramento de perdas e quebras por categoria e período.</div>
+      </a>
+
+      <a class="module-card prod-neg soon" href="#">
+        <div class="badge-soon">Em breve</div>
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        </div>
+        <div class="module-name">Produto Negativo</div>
+        <div class="module-desc">Identificação de produtos com estoque ou margem negativos.</div>
+      </a>
+
+      <a class="module-card trocas soon" href="#">
+        <div class="badge-soon">Em breve</div>
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+        </div>
+        <div class="module-name">Trocas</div>
+        <div class="module-desc">Controle e análise de devoluções e trocas de mercadorias.</div>
+      </a>
+
+    </div>
+
+    <!-- Metas de Venda -->
+    <div class="section-title" style="margin-top:10px;">Metas de Venda</div>
+    <div class="modules-grid">
+
+      <a class="module-card meta-diaria soon" href="#">
+        <div class="badge-soon">Em breve</div>
+        <div class="module-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17.586 3.586a2 2 0 112.828 2.828L12 15l-4 1 1-4 8.586-8.414z"/>
+          </svg>
+        </div>
+        <div class="module-name">Lanç. Meta Diária</div>
+        <div class="module-desc">Lançamento e gestão das metas diárias de venda por loja.</div>
+      </a>
+
+    </div>
+
+
+  </div>
+</div>
+
+<!-- Firebase Auth -->
+<script type="module">
+  import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, collection, query, orderBy, limit, getDocs }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey:            "AIzaSyB3s2ZQ-fC-YgIFXXXl7i9AjsiufK6ZnRY",
+    authDomain:        "projeto-paulo-d5ac4.firebaseapp.com",
+    projectId:         "projeto-paulo-d5ac4",
+    storageBucket:     "projeto-paulo-d5ac4.firebasestorage.app",
+    messagingSenderId: "844667053328",
+    appId:             "1:844667053328:web:716d64598f5c396e777195",
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  // Garante que só acessa logado
+  onAuthStateChanged(auth, user => {
+    if (!user) {
+      window.location.href = 'index.html';
+      return;
+    }
+    // Nome do usuário
+    const name = user.displayName || user.email.split('@')[0];
+    const initials = name.charAt(0).toUpperCase();
+    document.getElementById('user-name').textContent = name;
+    document.getElementById('user-avatar').textContent = initials;
+    document.getElementById('welcome-msg').textContent = `Olá, ${name}!`;
+  });
+
+  // Logout
+  document.getElementById('btn-logout').addEventListener('click', async () => {
+    await signOut(auth);
+    window.location.href = 'index.html';
+  });
+
+  // Banner de boas-vindas
+  const now   = new Date();
+  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  document.getElementById('welcome-day').textContent   = now.getDate();
+  document.getElementById('welcome-month').textContent = `${meses[now.getMonth()]} ${now.getFullYear()}`;
+
+  // Última atualização do Qlik (via cache Firebase)
+  async function loadLastSync() {
+    try {
+      const q = query(collection(db, "cache_vendas"), orderBy("saved_at", "desc"), limit(1));
+      const snap = await getDocs(q);
+      const label = document.getElementById('last-sync-label');
+      if (!snap.empty) {
+        const saved_at = snap.docs[0].data().saved_at;
+        const dt = new Date(saved_at * 1000);
+        const dia  = String(dt.getDate()).padStart(2,'0');
+        const mes  = String(dt.getMonth()+1).padStart(2,'0');
+        const ano  = dt.getFullYear();
+        const hora = dt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+        label.textContent = `Última atualização: ${dia}/${mes}/${ano} às ${hora}`;
+      } else {
+        label.textContent = 'Sem dados em cache ainda';
+      }
+    } catch(e) {
+      document.getElementById('last-sync-label').textContent = 'Última atualização: —';
+    }
+  }
+  loadLastSync();
+</script>
+</body>
+</html>
