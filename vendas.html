@@ -643,10 +643,9 @@
   </div>
 </div>
 
-<!-- FIREBASE -->
+<!-- Auth + Firebase Firestore -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFirestore, collection, query, orderBy, limit, getDocs }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -659,19 +658,21 @@
     appId:             "1:844667053328:web:716d64598f5c396e777195",
   };
 
-  const app  = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db   = getFirestore(app);
+  const fbApp = initializeApp(firebaseConfig);
+  const db    = getFirestore(fbApp);
 
-  onAuthStateChanged(auth, user => {
-    if (!user) { window.location.href = 'index.html'; return; }
-    const name = user.displayName || user.email.split('@')[0];
+  // Verifica sessão local
+  const authUser = sessionStorage.getItem('auth_user');
+  if (!authUser) {
+    window.location.href = 'index.html';
+  } else {
+    const name = authUser.split('@')[0];
     document.getElementById('user-name').textContent   = name;
     document.getElementById('user-avatar').textContent = name.charAt(0).toUpperCase();
-  });
+  }
 
-  document.getElementById('btn-logout').addEventListener('click', async () => {
-    await signOut(auth);
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    sessionStorage.removeItem('auth_user');
     window.location.href = 'index.html';
   });
 
@@ -973,15 +974,6 @@ function carregarDados() {
     document.getElementById('kpi-quebra-perda').textContent   = fmtPct(t.meta_quebra > 0 ? (t.quebra / t.meta_quebra * 100) : 0);
     document.getElementById('kpi-trocas-pendentes').textContent = '—';
 
-    // Popular filtro de empresa na primeira carga (quando não há filtro ativo)
-    if (DD_DATA.empresa.all.length === 0 && resp.data && resp.data.length > 0) {
-      const nomes = resp.data.map(function(r) { return r.empresa; }).sort();
-      DD_DATA.empresa.all = nomes;
-      DD_DATA.empresa.selected = new Set(nomes);
-      renderDD('empresa');
-      updateDDLabel('empresa');
-    }
-
     // Preencher tabela
     const rows = resp.data;
     if (!rows || rows.length === 0) {
@@ -1065,24 +1057,37 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
   tbody.innerHTML = '<tr class="loading-row"><td colspan="10"><span class="spinner-inline"></span>Iniciando servidor...</td></tr>';
   let acordado = false;
 
-  // Atualiza filtros do backend em background (captura eventuais novos valores)
-  function atualizarFiltros() {
+  // Carrega todos os filtros do backend (incluindo empresas) e depois carrega os dados
+  function atualizarFiltros(callback) {
     fetch(BACKEND_URL + '/api/filtros')
       .then(function(r) { return r.json(); })
       .then(function(f) {
-        if (f.error) return;
+        if (f.error) { if (callback) callback(); return; }
         if (f.departamentos && f.departamentos.length > 0) initDD('departamento', f.departamentos);
         if (f.secoes        && f.secoes.length > 0)        initDD('secao',        f.secoes);
         if (f.compradores   && f.compradores.length > 0)   initDD('comprador',    f.compradores);
+        if (f.empresas      && f.empresas.length > 0) {
+          DD_DATA.empresa.all      = f.empresas;
+          DD_DATA.empresa.selected = new Set(f.empresas);
+          renderDD('empresa');
+          updateDDLabel('empresa');
+        }
+        if (f.bandeiras && f.bandeiras.length > 0) {
+          DD_DATA.bandeira.all      = f.bandeiras;
+          DD_DATA.bandeira.selected = new Set(f.bandeiras);
+          renderDD('bandeira');
+          updateDDLabel('bandeira');
+        }
+        if (callback) callback();
       })
-      .catch(function() {});
+      .catch(function() { if (callback) callback(); });
   }
 
   function iniciar() {
     if (acordado) return;
     acordado = true;
-    atualizarFiltros();
-    carregarDados();
+    // Carrega filtros primeiro, depois os dados
+    atualizarFiltros(function() { carregarDados(); });
   }
 
   fetch(BACKEND_URL + '/api/health')

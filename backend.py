@@ -267,30 +267,45 @@ def health():
 
 @app.route("/api/filtros")
 def api_filtros():
+    """Retorna listas de filtros lidas diretamente do Firestore (farol_granular do último mês disponível)."""
     mem = _mem_get("__filtros__")
     if mem:
         return jsonify(mem)
-    fs_data = _fs_get("__filtros__")
-    if fs_data:
-        _mem_set("__filtros__", fs_data)
-        return jsonify(fs_data)
+
     try:
-        comp_raw, dept_raw, sec_raw = _run_async_all(
-            _hypercube(APP_FAROL, ["Comprador"], [], rows=100),
-            _hypercube(APP_FAROL, ["Nível 1"],   [], rows=20),
-            _hypercube(APP_FAROL, ["Nível 2"],   [], rows=50),
-        )
-        compradores   = sorted([r["Comprador"].strip() for r in comp_raw
-                                if r.get("Comprador","").strip()
-                                and r.get("Comprador") != "<Não Identificado>"])
-        departamentos = sorted([r["Nível 1"].strip() for r in dept_raw
-                                if r.get("Nível 1","").strip()])
-        secoes        = sorted([r["Nível 2"].strip() for r in sec_raw
-                                if r.get("Nível 2","").strip()])
-        payload = {"compradores": compradores, "departamentos": departamentos, "secoes": secoes}
-        _fs_set("__filtros__", payload)
+        if not FIREBASE_OK:
+            raise RuntimeError("Firestore não configurado")
+
+        # Descobre o último período disponível no índice
+        idx_docs = list(_db.collection("farol_granular_index").stream())
+        if not idx_docs:
+            raise RuntimeError("Nenhum dado no banco")
+
+        # Pega o doc mais recente (maior ID = maior data)
+        ultimo = sorted(d.id for d in idx_docs)[-1]
+        # ID formato: 2026_04_01 → extrai ano/mes/dia
+        partes = ultimo.split("_")
+        ano_u, mes_u, dia_u = int(partes[0]), int(partes[1]), int(partes[2])
+
+        # Lê apenas 1 dia (o mais recente) para extrair os valores únicos de filtro
+        rows = _ler_farol("farol_granular", ano_u, mes_u, dia_u, dia_u)
+
+        empresas      = sorted({r["empresa"]      for r in rows if r.get("empresa")})
+        bandeiras     = sorted({r["bandeira"]      for r in rows if r.get("bandeira")})
+        compradores   = sorted({r["comprador"]     for r in rows
+                                if r.get("comprador") and r["comprador"] != "NÃO IDENTIFICADO"})
+        departamentos = sorted({r["departamento"]  for r in rows if r.get("departamento")})
+        secoes        = sorted({r["secao"]         for r in rows if r.get("secao")})
+
+        payload = {
+            "empresas": empresas, "bandeiras": bandeiras,
+            "compradores": compradores,
+            "departamentos": departamentos,
+            "secoes": secoes,
+        }
         _mem_set("__filtros__", payload)
         return jsonify(payload)
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
