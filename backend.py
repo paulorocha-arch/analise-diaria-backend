@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Análise Diária — Backend
-Serve dados do Qlik Cloud (app Farol) para o frontend no Netlify.
+Arquitetura: Qlik Cloud → Firestore (cache) → Dashboard
 Iniciar: python backend.py
 """
 
-import asyncio, json, os, sys, time
+import asyncio, base64, hashlib, json, os, sys, time
 from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -25,16 +25,99 @@ if os.path.exists(_env):
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-TENANT  = os.environ.get("QLIK_TENANT", "bigbox.us.qlikcloud.com")
-API_KEY = os.environ.get("QLIK_API_KEY", "")
+TENANT    = os.environ.get("QLIK_TENANT", "bigbox.us.qlikcloud.com")
+API_KEY   = os.environ.get("QLIK_API_KEY", "")
 APP_FAROL = "bd053bfe-11b0-4f35-ab25-d316e23f8977"
 
 app = Flask(__name__)
 CORS(app, origins="*")
 
-# Cache em memória: {cache_key: (timestamp, result)}
-_cache = {}
-_CACHE_TTL = 300  # 5 minutos
+# ── Firestore ────────────────────────────────────────────────────────────────
+_db         = None
+FIREBASE_OK = False
+FIRESTORE_TTL = 3600   # 1 hora — dados do Firestore considerados frescos
+
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore as _fs
+
+    # Prioridade 1: variável de ambiente FIREBASE_KEY_JSON (base64) → Render
+    _key_b64 = os.environ.get("FIREBASE_KEY_JSON", "")
+    # Prioridade 2: arquivo local (desenvolvimento)
+    _key_file = r"C:\Users\paulorocha\qlik-dashboard\firebase-key.json"
+
+    if _key_b64:
+        _key_data = json.loads(base64.b64decode(_key_b64).decode())
+        cred = credentials.Certificate(_key_data)
+    elif os.path.exists(_key_file):
+        cred = credentials.Certificate(_key_file)
+    else:
+        cred = None
+
+    if cred and not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+        _db = _fs.client()
+        FIREBASE_OK = True
+        print("Firestore: OK")
+    elif cred:
+        _db = _fs.client()
+        FIREBASE_OK = True
+        print("Firestore: OK (app ja inicializado)")
+    else:
+        print("Firestore: chave nao encontrada — usando apenas cache em memoria")
+except Exception as _e:
+    print(f"Firestore: erro na inicializacao — {_e}")
+
+
+def _fs_key(params: dict) -> str:
+    raw = json.dumps(params, sort_keys=True)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _fs_get(doc_id: str):
+    """Lê do Firestore. Retorna payload ou None se expirado/ausente."""
+    if not FIREBASE_OK:
+        return None
+    try:
+        doc = _db.collection("cache_vendas").document(doc_id).get()
+        if doc.exists:
+            d = doc.to_dict()
+            if time.time() - d.get("saved_at", 0) < FIRESTORE_TTL:
+                return d.get("payload")
+    except Exception as e:
+        print(f"Firestore get erro: {e}")
+    return None
+
+
+def _fs_set(doc_id: str, payload: dict, meta: dict = None):
+    """Salva no Firestore."""
+    if not FIREBASE_OK:
+        return
+    try:
+        doc = {"payload": payload, "saved_at": time.time(),
+               "updated_at": datetime.now(timezone.utc).isoformat()}
+        if meta:
+            doc["meta"] = meta
+        _db.collection("cache_vendas").document(doc_id).set(doc)
+    except Exception as e:
+        print(f"Firestore set erro: {e}")
+
+
+# ── Cache em memória (camada rápida na frente do Firestore) ──────────────────
+_mem_cache   = {}
+_MEM_TTL     = 300   # 5 minutos
+
+
+def _mem_get(key):
+    entry = _mem_cache.get(key)
+    if entry and time.time() - entry[0] < _MEM_TTL:
+        return entry[1]
+    return None
+
+
+def _mem_set(key, val):
+    _mem_cache[key] = (time.time(), val)
+
 
 # ── Helpers Qlik Engine API ──────────────────────────────────────────────────
 
@@ -82,9 +165,9 @@ async def _engine_session(app_id, callback):
 
 
 async def _hypercube(app_id, dimensions, measures, rows=100):
-    q_dims  = [{"qDef": {"qFieldDefs": [d]}} for d in dimensions]
-    q_meas  = [{"qDef": {"qDef": m}} for m in measures]
-    n_cols  = len(dimensions) + len(measures)
+    q_dims    = [{"qDef": {"qFieldDefs": [d]}} for d in dimensions]
+    q_meas    = [{"qDef": {"qDef": m}} for m in measures]
+    n_cols    = len(dimensions) + len(measures)
     col_names = dimensions + measures
 
     async def _run(rpc, recv_until, doc_handle):
@@ -161,7 +244,6 @@ def _days(d1, d2):
 
 
 def _set_extra(compradores, departamentos, secoes):
-    """Monta condições extras para o set analysis do Qlik."""
     parts = []
     if compradores:
         vals = ",".join("'" + v + "'" for v in compradores)
@@ -179,18 +261,19 @@ def _set_extra(compradores, departamentos, secoes):
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "tenant": TENANT, "api_key": bool(API_KEY)})
+    return jsonify({"status": "ok", "tenant": TENANT,
+                    "api_key": bool(API_KEY), "firestore": FIREBASE_OK})
 
 
 @app.route("/api/filtros")
 def api_filtros():
-    """Retorna opções dos filtros: compradores, departamentos, seções."""
-    cache_key = "__filtros__"
-    cached = _cache.get(cache_key)
-    if cached:
-        ts, payload = cached
-        if time.time() - ts < 3600:   # cache de 1 hora
-            return jsonify(payload)
+    mem = _mem_get("__filtros__")
+    if mem:
+        return jsonify(mem)
+    fs_data = _fs_get("__filtros__")
+    if fs_data:
+        _mem_set("__filtros__", fs_data)
+        return jsonify(fs_data)
     try:
         comp_raw, dept_raw, sec_raw = _run_async_all(
             _hypercube(APP_FAROL, ["Comprador"], [], rows=100),
@@ -205,7 +288,8 @@ def api_filtros():
         secoes        = sorted([r["Nível 2"].strip() for r in sec_raw
                                 if r.get("Nível 2","").strip()])
         payload = {"compradores": compradores, "departamentos": departamentos, "secoes": secoes}
-        _cache[cache_key] = (time.time(), payload)
+        _fs_set("__filtros__", payload)
+        _mem_set("__filtros__", payload)
         return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -213,20 +297,11 @@ def api_filtros():
 
 @app.route("/api/vendas", methods=["POST"])
 def api_vendas():
-    """
-    Body JSON:
-      ano      : int  (ex: 2026)
-      mes      : int  (1-12)
-      dia_ini  : int  (1)
-      dia_fim  : int  (ultimo dia selecionado)
-      empresas : list[str]  ([] = todas)
-      bandeiras: list[str]  ([] = todas)
-    """
-    body     = request.json or {}
-    ano      = int(body.get("ano", datetime.now().year))
-    mes      = int(body.get("mes", datetime.now().month))
-    dia_ini  = int(body.get("dia_ini", 1))
-    dia_fim  = int(body.get("dia_fim", datetime.now().day - 1))
+    body          = request.json or {}
+    ano           = int(body.get("ano",  datetime.now().year))
+    mes           = int(body.get("mes",  datetime.now().month))
+    dia_ini       = int(body.get("dia_ini", 1))
+    dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
     empresas      = body.get("empresas", [])
     bandeiras     = body.get("bandeiras", [])
     compradores_f = body.get("compradores", [])
@@ -236,22 +311,33 @@ def api_vendas():
     if dia_ini > dia_fim:
         dia_ini, dia_fim = dia_fim, dia_ini
 
-    # Cache lookup
-    cache_key = (f"{ano}-{mes}-{dia_ini}-{dia_fim}"
-                 f"-{sorted(empresas)}-{sorted(bandeiras)}"
-                 f"-{sorted(compradores_f)}-{sorted(departamentos)}-{sorted(secoes)}")
-    cached = _cache.get(cache_key)
-    if cached:
-        ts, payload = cached
-        if time.time() - ts < _CACHE_TTL:
-            return jsonify(payload)
+    params = {
+        "ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
+        "empresas": sorted(empresas), "bandeiras": sorted(bandeiras),
+        "compradores": sorted(compradores_f),
+        "departamentos": sorted(departamentos),
+        "secoes": sorted(secoes),
+    }
+    mem_key = json.dumps(params, sort_keys=True)
+    fs_doc  = _fs_key(params)
 
+    # 1. Cache em memória (mais rápido)
+    mem = _mem_get(mem_key)
+    if mem:
+        return jsonify(mem)
+
+    # 2. Firestore (persiste entre reinicializações do Render)
+    fs_data = _fs_get(fs_doc)
+    if fs_data:
+        _mem_set(mem_key, fs_data)
+        return jsonify(fs_data)
+
+    # 3. Consulta Qlik
     ma      = _mes_ano(ano, mes)
     ma_aa   = _mes_ano(ano - 1, mes)
     days    = _days(dia_ini, dia_fim)
     days_aa = days
-
-    xtra = _set_extra(compradores_f, departamentos, secoes)
+    xtra    = _set_extra(compradores_f, departamentos, secoes)
 
     V_ACUM    = f"Sum({{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
     M_ACUM    = f"Sum({{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{xtra}>}} #Medida1)"
@@ -286,56 +372,45 @@ def api_vendas():
         empresa = row.get("Empresa", "").strip()
         if not empresa or empresa == "-":
             continue
-
-        # Filtro de bandeira
         bandeira = "BIG BOX" if empresa.upper().startswith("BIG") else "ULT"
         if bandeiras and bandeira not in bandeiras:
             continue
         if empresas and empresa not in empresas:
             continue
 
-        va   = _float(row.get(V_ACUM))
-        ma   = _float(row.get(M_ACUM))
-        v_aa = _float(row.get(V_AA))
-        m_mes= _float(row.get(M_MES))
-        nc   = _float(row.get(NRO_CL))
-        nc_aa= _float(row.get(NRO_CL_AA))
-        mrg  = _float(row.get(MRG_PDV))
-        m_mrg= _float(row.get(M_MRG))
-        qbr  = _float(row.get(QUEBRA))
-        m_qbr= _float(row.get(M_QUEBRA))
+        va    = _float(row.get(V_ACUM))
+        ma_v  = _float(row.get(M_ACUM))
+        v_aa  = _float(row.get(V_AA))
+        m_mes = _float(row.get(M_MES))
+        nc    = _float(row.get(NRO_CL))
+        nc_aa = _float(row.get(NRO_CL_AA))
+        mrg   = _float(row.get(MRG_PDV))
+        m_mrg = _float(row.get(M_MRG))
+        qbr   = _float(row.get(QUEBRA))
+        m_qbr = _float(row.get(M_QUEBRA))
 
-        tm    = round(va / nc,  2) if nc   > 0 else 0
-        tm_aa = round(v_aa / nc_aa, 2) if nc_aa > 0 else 0
+        tm    = round(va / nc,     2) if nc    > 0 else 0
+        tm_aa = round(v_aa / nc_aa,2) if nc_aa > 0 else 0
 
-        # Prog. Venda ML% = projeção linear / meta mês
-        prog_venda = round((va / dias_passados * dias_no_mes / m_mes * 100) if m_mes > 0 and dias_passados > 0 else 0, 2)
-        # Prog. Clientes ML%
+        prog_venda = round((va / dias_passados * dias_no_mes / m_mes * 100)   if m_mes > 0 and dias_passados > 0 else 0, 2)
         prog_cl    = round((nc / dias_passados * dias_no_mes / (nc_aa or 1) * 100 - 100) if dias_passados > 0 else 0, 2)
-        # Prog. Ticket Médio ML%
-        prog_tm    = round(((tm / tm_aa - 1) * 100) if tm_aa > 0 else 0, 2)
-        # % Cresc Nro Clientes
-        cresc_cl   = round(((nc / nc_aa - 1) * 100) if nc_aa > 0 else 0, 2)
-        # % Cresc Ticket
-        cresc_tm   = round(((tm / tm_aa - 1) * 100) if tm_aa > 0 else 0, 2)
-        # Atingimento %
-        ating      = round((va / ma * 100) if ma > 0 else 0, 2)
-        ating_mrg  = round((mrg / m_mrg * 100) if m_mrg > 0 else 0, 2)
+        prog_tm    = round(((tm / tm_aa - 1) * 100)   if tm_aa > 0 else 0, 2)
+        cresc_cl   = round(((nc / nc_aa - 1) * 100)   if nc_aa > 0 else 0, 2)
+        cresc_tm   = round(((tm / tm_aa - 1) * 100)   if tm_aa > 0 else 0, 2)
+        ating      = round((va / ma_v * 100)           if ma_v  > 0 else 0, 2)
+        ating_mrg  = round((mrg / m_mrg * 100)         if m_mrg > 0 else 0, 2)
 
         rows_out.append({
-            "empresa":       empresa,
-            "bandeira":      bandeira,
-            # Tabela
-            "meta_venda":    round(ma, 2),
+            "empresa": empresa, "bandeira": bandeira,
+            "meta_venda":    round(ma_v, 2),
             "venda":         round(va, 2),
-            "desvio":        round(va - ma, 2),
+            "desvio":        round(va - ma_v, 2),
             "nro_clientes":  int(nc),
             "prog_cl_ml":    prog_cl,
             "ticket_medio":  tm,
             "prog_tm_ml":    prog_tm,
             "prog_venda_ml": prog_venda,
             "ating":         ating,
-            # KPIs extras
             "cresc_cl":      cresc_cl,
             "cresc_tm":      cresc_tm,
             "margem_pdv":    round(mrg, 2),
@@ -347,8 +422,7 @@ def api_vendas():
 
     rows_out.sort(key=lambda x: x["empresa"])
 
-    # Totais
-    def _sum(k): return round(sum(r[k] for r in rows_out), 2)
+    def _sum(k):    return round(sum(r[k] for r in rows_out), 2)
     def _sumint(k): return sum(r[k] for r in rows_out)
 
     tot_va   = _sum("venda")
@@ -361,8 +435,7 @@ def api_vendas():
     tot_tm   = round(tot_va / tot_nc, 2) if tot_nc > 0 else 0
 
     totais = {
-        "empresa":       "TOTAIS",
-        "bandeira":      "",
+        "empresa": "TOTAIS", "bandeira": "",
         "meta_venda":    tot_ma,
         "venda":         tot_va,
         "desvio":        round(tot_va - tot_ma, 2),
@@ -372,8 +445,7 @@ def api_vendas():
         "prog_tm_ml":    0,
         "prog_venda_ml": round((tot_va / dias_passados * dias_no_mes / tot_ma * 100) if tot_ma > 0 and dias_passados > 0 else 0, 2),
         "ating":         round((tot_va / tot_ma * 100) if tot_ma > 0 else 0, 2),
-        "cresc_cl":      0,
-        "cresc_tm":      0,
+        "cresc_cl":      0, "cresc_tm":      0,
         "margem_pdv":    tot_mrg,
         "meta_margem":   tot_mmrg,
         "ating_margem":  round((tot_mrg / tot_mmrg * 100) if tot_mmrg > 0 else 0, 2),
@@ -387,11 +459,16 @@ def api_vendas():
         "totais":  totais,
         "data":    rows_out,
     }
-    _cache[cache_key] = (time.time(), payload)
+
+    # Salva no Firestore e memória
+    _fs_set(fs_doc, payload, meta=params)
+    _mem_set(mem_key, payload)
+
     return jsonify(payload)
 
 
 if __name__ == "__main__":
     print(f"Backend Analise Diaria — http://localhost:5001")
     print(f"Tenant: {TENANT}  |  API Key: {'OK' if API_KEY else 'NAO DEFINIDA'}")
+    print(f"Firestore: {'OK' if FIREBASE_OK else 'NAO CONFIGURADO'}")
     app.run(debug=False, host="0.0.0.0", port=5001)
