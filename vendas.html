@@ -1199,11 +1199,10 @@ function carregarGrafico() {
   .then(function(resp) {
     if (resp.error || !resp.dias || resp.dias.length === 0) return;
 
-    const meta_mes = resp.meta_mes;
-    const labels = resp.dias.map(function(d) { return d.label; });
-    const vendas = resp.dias.map(function(d) { return d.venda; });
-    // Meta aparece só nos dias sem venda (dias futuros / fora do filtro)
-    const metas  = resp.dias.map(function(d) { return (d.venda == null) ? meta_mes : null; });
+    const labels   = resp.dias.map(function(d) { return d.label; });
+    const vendas   = resp.dias.map(function(d) { return d.venda; });     // barras azuis nos dias com venda
+    const metaDias = resp.dias.map(function(d) { return d.meta_dia; });  // barras cinza nos dias sem venda
+    const atings   = resp.dias.map(function(d) { return d.ating; });     // linha verde ating%
 
     const ctx = document.getElementById('chart-ating').getContext('2d');
     if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
@@ -1216,21 +1215,36 @@ function carregarGrafico() {
             type: 'bar',
             label: 'Venda R$',
             data: vendas,
-            backgroundColor: 'rgba(41,128,185,0.20)',
-            borderColor: 'rgba(41,128,185,0.40)',
+            backgroundColor: 'rgba(41,128,185,0.22)',
+            borderColor: 'rgba(41,128,185,0.45)',
             borderWidth: 1,
-            borderRadius: 4,
+            borderRadius: 3,
+            yAxisID: 'y',
             order: 2,
           },
           {
+            type: 'bar',
+            label: 'Meta Dia R$',
+            data: metaDias,
+            backgroundColor: 'rgba(180,180,180,0.20)',
+            borderColor: 'rgba(180,180,180,0.35)',
+            borderWidth: 1,
+            borderRadius: 3,
+            yAxisID: 'y',
+            order: 3,
+          },
+          {
             type: 'line',
-            label: 'Meta Mês R$',
-            data: metas,
-            borderColor: '#e74c3c',
-            borderWidth: 1.5,
-            borderDash: [6, 4],
-            pointRadius: 0,
-            tension: 0,
+            label: 'Ating %',
+            data: atings,
+            borderColor: '#27ae60',
+            borderWidth: 2,
+            pointBackgroundColor: '#27ae60',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            spanGaps: false,
+            yAxisID: 'y2',
             order: 1,
           },
         ]
@@ -1244,10 +1258,11 @@ function carregarGrafico() {
           tooltip: {
             callbacks: {
               label: function(c) {
-                if (c.dataset.label === 'Meta Mês R$')
-                  return ' Meta mês: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits: 0});
-                if (c.parsed.y == null) return null;
-                return ' Venda: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits: 0});
+                if (c.dataset.label === 'Ating %')
+                  return c.parsed.y != null ? ' Ating: ' + c.parsed.y.toFixed(1) + '%' : null;
+                if (c.dataset.label === 'Meta Dia R$')
+                  return c.parsed.y != null ? ' Meta/dia: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0}) : null;
+                return c.parsed.y != null ? ' Venda: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0}) : null;
               }
             }
           }
@@ -1258,9 +1273,26 @@ function carregarGrafico() {
             border: { display: false },
             ticks: { font: { size: 10 }, color: '#888', maxRotation: 0 }
           },
-          y: {
-            display: false,
-            grid: { display: false },
+          y:  { display: false },
+          y2: { display: false }
+        },
+        animation: {
+          onComplete: function() {
+            const chart  = this;
+            const dsMeta = chart.getDatasetMeta(2);
+            const dsData = chart.data.datasets[2].data;
+            const ctx2   = chart.ctx;
+            ctx2.save();
+            ctx2.font = 'bold 11px Arial';
+            ctx2.textAlign = 'center';
+            dsMeta.data.forEach(function(pt, i) {
+              const val = dsData[i];
+              if (val == null) return;
+              const color = val >= 100 ? '#27ae60' : val >= 95 ? '#e6c200' : '#e74c3c';
+              ctx2.fillStyle = color;
+              ctx2.fillText(val.toFixed(1) + '%', pt.x, pt.y - 9);
+            });
+            ctx2.restore();
           }
         }
       }

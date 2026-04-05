@@ -910,6 +910,7 @@ def api_atingimento_diario():
     # Eixo X = todos os dias do mês; barras só nos dias filtrados
     dias_sem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
     dias_filtrados = set(range(dia_ini, dia_fim + 1))
+    meta_dia = round(meta_mes / dias_no_mes, 2) if dias_no_mes > 0 else 0.0
 
     resultado = []
     for d in range(1, dias_no_mes + 1):
@@ -918,10 +919,14 @@ def api_atingimento_diario():
             label = f"{d:02d}/{dias_sem[wd]}"
         except Exception:
             label = f"{d:02d}"
-        venda = round(venda_por_dia.get(d, 0.0), 2) if d in dias_filtrados else None
-        resultado.append({"dia": d, "label": label, "venda": venda})
+        if d in dias_filtrados:
+            venda = round(venda_por_dia.get(d, 0.0), 2)
+            ating = round(venda / meta_dia * 100, 1) if meta_dia > 0 else None
+            resultado.append({"dia": d, "label": label, "venda": venda, "meta_dia": None, "ating": ating})
+        else:
+            resultado.append({"dia": d, "label": label, "venda": None, "meta_dia": meta_dia, "ating": None})
 
-    return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
+    return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2), "meta_dia": meta_dia})
 
 
 @app.route("/api/vendas/drill", methods=["POST"])
