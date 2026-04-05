@@ -385,32 +385,46 @@ def api_drill():
     if mem:
         return jsonify(mem)
 
-    # ── Qlik set expression ──────────────────────────────────────────────────
+    # ── Qlik set expressions ─────────────────────────────────────────────────
     ma         = _mes_ano(ano, mes)
     days       = _days(dia_ini, dia_fim)
     extra      = _set_extra(compradores_f, departamentos, secoes_f)
     emp_filter = f",Empresa={{'{empresa}'}}"
     set_v = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
              f"Dia={{{days}}}{extra}{emp_filter}>}}")
+    set_m = (f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},"
+             f"Dia={{{days}}}{emp_filter}>}}")
 
     try:
-        rows = _run_async(_hypercube(
-            APP_FAROL,
-            ["Nível 1", "Nível 2"],
-            [
-                f"Sum({set_v} #Medida1)",
-                f"Sum({set_v} #Medida2)",
-                f"Count({set_v} Distinct ChaveNF)",
-            ],
-            rows=500,
-        ))
+        rows_v, rows_m = _run_async_all(
+            _hypercube(
+                APP_FAROL,
+                ["Nível 1", "Nível 2"],
+                [
+                    f"Sum({set_v} #Medida1)",
+                    f"Sum({set_v} #Medida2)",
+                    f"Count({set_v} Distinct ChaveNF)",
+                ],
+                rows=500,
+            ),
+            _hypercube(
+                APP_FAROL,
+                ["Nível 1"],
+                [f"Sum({set_m} #Medida1)"],
+                rows=100,
+            ),
+        )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    # ── Agrupar por Departamento > Seção ─────────────────────────────────────
+    # ── Mapa meta por departamento ────────────────────────────────────────────
+    meta_dept = {(r.get("Nível 1") or "").strip(): _float(r.get("_m0", "0"))
+                 for r in rows_m}
+
+    # ── Agrupar vendas por Departamento > Seção ───────────────────────────────
     from collections import defaultdict
     deps = defaultdict(list)
-    for r in rows:
+    for r in rows_v:
         dept  = (r.get("Nível 1") or "").strip()
         secao = (r.get("Nível 2") or "").strip()
         if not dept:
@@ -424,10 +438,15 @@ def api_drill():
 
     result = []
     for dept in sorted(deps):
-        slist = sorted(deps[dept], key=lambda x: x["secao"])
+        slist     = sorted(deps[dept], key=lambda x: x["secao"])
+        venda     = round(sum(s["venda"]      for s in slist), 2)
+        meta      = round(meta_dept.get(dept, 0), 2)
         result.append({
             "departamento": dept,
-            "venda":        round(sum(s["venda"]        for s in slist), 2),
+            "meta_venda":   meta,
+            "venda":        venda,
+            "desvio":       round(venda - meta, 2),
+            "ating":        round(venda / meta * 100, 2) if meta > 0 else 0,
             "margem_pdv":   round(sum(s["margem_pdv"]   for s in slist), 2),
             "nro_clientes": sum(s["nro_clientes"]        for s in slist),
             "secoes":       slist,

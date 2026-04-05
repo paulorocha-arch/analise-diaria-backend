@@ -1141,6 +1141,10 @@ function renderDrill(empId, lojaRow, deptData) {
     deptTr.className = 'dept-row';
     deptTr.setAttribute('data-drill-parent', empId);
     deptTr.setAttribute('data-dept-key', deptKey);
+    var dMeta  = dept.meta_venda  || 0;
+    var dVenda = dept.venda       || 0;
+    var dDesvio = dept.desvio != null ? dept.desvio : (dVenda - dMeta);
+    var dAting  = dept.ating  != null ? dept.ating  : (dMeta > 0 ? dVenda / dMeta * 100 : 0);
     deptTr.innerHTML =
       '<td>' +
         '<button class="btn-drill" id="drill-dept-' + deptKey + '" ' +
@@ -1148,15 +1152,15 @@ function renderDrill(empId, lojaRow, deptData) {
           'title="Ver por Seção">&#9654;</button>' +
         dept.departamento +
       '</td>' +
-      '<td class="num">—</td>' +
-      '<td class="num">' + fmtMoeda(dept.venda) + '</td>' +
-      '<td class="num ' + (dept.venda >= 0 ? '' : 'bad') + '">—</td>' +
+      '<td class="num">' + fmtMoeda(dMeta) + '</td>' +
+      '<td class="num">' + fmtMoeda(dVenda) + '</td>' +
+      '<td class="num ' + (dDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(dDesvio) + '</td>' +
       '<td class="num">' + Number(dept.nro_clientes).toLocaleString('pt-BR') + '</td>' +
       '<td class="num">—</td>' +
       '<td class="num">—</td>' +
       '<td class="num">—</td>' +
       '<td class="num">—</td>' +
-      '<td class="num">—</td>';
+      '<td class="num ' + pctClass(dAting) + '">' + fmtPct(dAting) + '</td>';
 
     // Guarda seções no dataset para acesso rápido
     deptTr.dataset.secoes = JSON.stringify(dept.secoes);
