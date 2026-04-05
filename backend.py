@@ -840,6 +840,98 @@ def api_vendas():
     return jsonify(payload)
 
 
+@app.route("/api/atingimento-diario", methods=["POST"])
+def api_atingimento_diario():
+    """
+    Retorna venda diária e meta diária (meta_mes / dias_no_mes) para o gráfico.
+    Parâmetros: mesmo body do /api/vendas.
+    """
+    from calendar import monthrange
+    import datetime as _dt
+
+    body          = request.json or {}
+    ano           = int(body.get("ano",  datetime.now().year))
+    mes           = int(body.get("mes",  datetime.now().month))
+    dia_ini       = int(body.get("dia_ini", 1))
+    dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
+    empresas_f    = body.get("empresas",      [])
+    bandeiras_f   = body.get("bandeiras",     [])
+    compradores_f = body.get("compradores",   [])
+    departamentos = body.get("departamentos", [])
+    secoes        = body.get("secoes",        [])
+
+    if dia_ini > dia_fim:
+        dia_ini, dia_fim = dia_fim, dia_ini
+
+    dias_no_mes = monthrange(ano, mes)[1]
+
+    extra_v = _set_extra(compradores_f, departamentos, secoes)
+    extra_m = _set_extra([], departamentos, secoes)
+
+    emp_parts = []
+    if empresas_f:
+        vals = ",".join("'" + v + "'" for v in empresas_f)
+        emp_parts.append(f"Empresa={{{vals}}}")
+    if bandeiras_f:
+        vals = ",".join("'" + v + "'" for v in bandeiras_f)
+        emp_parts.append(f"Bandeira={{{vals}}}")
+    emp_extra = ("," + ",".join(emp_parts)) if emp_parts else ""
+
+    ma    = _mes_ano(ano, mes)
+    days  = _days(dia_ini, dia_fim)
+
+    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{extra_m}{emp_extra}>}}"
+
+    try:
+        rows_v, rows_m = _run_async_all(
+            _hypercube(APP_FAROL, ["Dia"],
+                       [f"Sum({set_v} #Medida1)"], rows=200),
+            _hypercube(APP_FAROL, [],
+                       [f"Sum({set_m_mes} #Medida1)"], rows=1),
+        )
+    except Exception as e:
+        return jsonify({"error": f"Qlik: {e}"}), 500
+
+    # Meta total do mês → meta diária (linha plana)
+    meta_mes = 0.0
+    if rows_m:
+        try:
+            meta_mes = float(str(rows_m[0].get("#Medida1", "0")).replace(".", "").replace(",", "."))
+        except Exception:
+            meta_mes = 0.0
+    meta_dia = round(meta_mes / dias_no_mes, 2) if dias_no_mes > 0 else 0.0
+
+    # Mapa dia → venda
+    venda_por_dia = {}
+    for r in rows_v:
+        try:
+            d = int(str(r.get("Dia", "0")).replace(",", "").replace(".", ""))
+            v = float(str(r.get("#Medida1", "0")).replace(".", "").replace(",", "."))
+            venda_por_dia[d] = v
+        except Exception:
+            pass
+
+    # Abreviações de dia da semana em PT-BR
+    dias_sem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+    resultado = []
+    for d in range(dia_ini, dia_fim + 1):
+        venda = round(venda_por_dia.get(d, 0.0), 2)
+        try:
+            wd = _dt.date(ano, mes, d).weekday()
+            label = f"{d:02d}/{dias_sem[wd]}"
+        except Exception:
+            label = f"{d:02d}"
+        ating = round((venda / meta_dia) * 100, 1) if meta_dia > 0 else 0.0
+        resultado.append({
+            "dia": d, "label": label,
+            "venda": venda, "meta_dia": meta_dia, "ating": ating
+        })
+
+    return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
+
+
 @app.route("/api/vendas/drill", methods=["POST"])
 def api_vendas_drill():
     """

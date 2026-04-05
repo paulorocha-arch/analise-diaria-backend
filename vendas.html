@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Vendas — Análise Diária</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -255,6 +256,22 @@
     .ating-badge.ating-ok   { color: #00e676; border-color: #00e676; background: rgba(0,230,118,0.08); }
     .ating-badge.ating-warn { color: #ffe000; border-color: #ffe000; background: rgba(255,224,0,0.08); }
     .ating-badge.ating-bad  { color: #ff1744; border-color: #ff1744; background: rgba(255,23,68,0.08); }
+
+    /* CHART CARD */
+    .chart-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 20px 24px 16px;
+      margin-bottom: 24px;
+    }
+    .chart-card .chart-title {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 700; color: #1a1a2e;
+      margin-bottom: 16px;
+    }
+    .chart-card .chart-title svg { opacity: 0.5; }
+    #chart-ating-wrapper { position: relative; height: 220px; }
 
     /* SECTION TITLE */
     .section-header {
@@ -692,6 +709,16 @@
       </table>
     </div>
 
+    <!-- Gráfico Atingimento por Dia -->
+    <div class="section-header">
+      <span class="section-title">Atingimento por Dia</span>
+    </div>
+    <div class="chart-card">
+      <div id="chart-ating-wrapper">
+        <canvas id="chart-ating"></canvas>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1008,7 +1035,7 @@ window.addEventListener('filtro:departamento', function() {
 });
 
 /* DADOS — escuta eventos dos filtros */
-function onFiltroChange() { _drillCache = {}; carregarDados(); }
+function onFiltroChange() { _drillCache = {}; carregarDados(); carregarGrafico(); }
 window.addEventListener('filtro:data',         onFiltroChange);
 window.addEventListener('filtro:bandeira',     onFiltroChange);
 window.addEventListener('filtro:empresa',      onFiltroChange);
@@ -1145,6 +1172,154 @@ function carregarDados() {
   .catch(function(err) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#e74c3c;">Erro ao conectar ao backend: ' + err.message + '</td></tr>';
   });
+}
+
+// ── Gráfico Atingimento por Dia ──────────────────────────────────────────────
+var _chartAting = null;
+
+function carregarGrafico() {
+  const ano     = rangeStart ? rangeStart.getFullYear()  : new Date().getFullYear();
+  const mes     = rangeStart ? rangeStart.getMonth() + 1 : new Date().getMonth() + 1;
+  const diaIni  = rangeStart ? rangeStart.getDate() : 1;
+  const diaFim  = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
+
+  fetch(BACKEND_URL + '/api/atingimento-diario', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ano, mes, dia_ini: diaIni, dia_fim: diaFim,
+      bandeiras:     sel('bandeira'),
+      empresas:      sel('empresa'),
+      compradores:   sel('comprador'),
+      departamentos: sel('departamento'),
+      secoes:        sel('secao'),
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(resp) {
+    if (resp.error || !resp.dias || resp.dias.length === 0) return;
+
+    const labels   = resp.dias.map(function(d) { return d.label; });
+    const vendas   = resp.dias.map(function(d) { return d.venda; });
+    const metas    = resp.dias.map(function(d) { return d.meta_dia; });
+    const atings   = resp.dias.map(function(d) { return d.ating; });
+
+    const ctx = document.getElementById('chart-ating').getContext('2d');
+
+    if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
+
+    _chartAting = new Chart(ctx, {
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Venda R$',
+            data: vendas,
+            backgroundColor: 'rgba(41,128,185,0.15)',
+            borderColor: 'rgba(41,128,185,0.3)',
+            borderWidth: 1,
+            borderRadius: 4,
+            yAxisID: 'y',
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: 'Meta Diária R$',
+            data: metas,
+            borderColor: '#e74c3c',
+            borderWidth: 1.5,
+            borderDash: [5, 4],
+            pointRadius: 0,
+            tension: 0,
+            yAxisID: 'y',
+            order: 3,
+          },
+          {
+            type: 'line',
+            label: 'Ating %',
+            data: atings,
+            borderColor: '#27ae60',
+            borderWidth: 2,
+            pointBackgroundColor: '#27ae60',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            yAxisID: 'y2',
+            order: 1,
+            datalabels: { display: true },
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                if (ctx.dataset.label === 'Ating %') return ' Ating: ' + ctx.parsed.y.toFixed(1) + '%';
+                if (ctx.dataset.label === 'Meta Diária R$') return ' Meta/dia: R$ ' + Number(ctx.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0});
+                return ' Venda: R$ ' + Number(ctx.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0});
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { font: { size: 11 }, color: '#888' }
+          },
+          y: {
+            position: 'left',
+            grid: { display: false },
+            border: { display: false },
+            ticks: {
+              font: { size: 10 }, color: '#bbb',
+              callback: function(v) {
+                if (v >= 1000000) return 'R$ ' + (v/1000000).toFixed(1) + 'M';
+                if (v >= 1000) return 'R$ ' + (v/1000).toFixed(0) + 'k';
+                return 'R$ ' + v;
+              }
+            }
+          },
+          y2: {
+            position: 'right',
+            grid: { display: false },
+            border: { display: false },
+            ticks: {
+              font: { size: 10 }, color: '#27ae60',
+              callback: function(v) { return v + '%'; }
+            }
+          }
+        },
+        // Rótulos de atingimento em cima da linha verde
+        animation: {
+          onComplete: function() {
+            const chart = this;
+            const ds = chart.data.datasets[2];  // Ating % line
+            const meta = chart.getDatasetMeta(2);
+            const ctx2 = chart.ctx;
+            ctx2.save();
+            ctx2.font = 'bold 11px Arial';
+            ctx2.textAlign = 'center';
+            meta.data.forEach(function(pt, i) {
+              const val = ds.data[i];
+              if (val == null) return;
+              const color = val >= 100 ? '#27ae60' : val >= 95 ? '#e6c200' : '#e74c3c';
+              ctx2.fillStyle = color;
+              ctx2.fillText(val.toFixed(0) + '%', pt.x, pt.y - 8);
+            });
+            ctx2.restore();
+          }
+        }
+      }
+    });
+  })
+  .catch(function() {});
 }
 
 // ── Drill-down: Loja → Departamento → Seção ──────────────────────────────────
@@ -1409,7 +1584,7 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
     if (acordado) return;
     acordado = true;
     // Carrega filtros primeiro, depois os dados
-    atualizarFiltros(function() { carregarDados(); });
+    atualizarFiltros(function() { carregarDados(); carregarGrafico(); });
   }
 
   fetch(BACKEND_URL + '/api/health')
