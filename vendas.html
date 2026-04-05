@@ -1201,8 +1201,9 @@ function carregarGrafico() {
 
     const meta_mes = resp.meta_mes;
     const labels = resp.dias.map(function(d) { return d.label; });
-    const vendas = resp.dias.map(function(d) { return d.venda; });          // null nos dias fora do filtro
-    const metas  = resp.dias.map(function()  { return meta_mes; });         // linha plana no valor total do mês
+    const vendas = resp.dias.map(function(d) { return d.venda; });
+    // Meta aparece só nos dias sem venda (dias futuros / fora do filtro)
+    const metas  = resp.dias.map(function(d) { return (d.venda == null) ? meta_mes : null; });
 
     const ctx = document.getElementById('chart-ating').getContext('2d');
     if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
