@@ -1753,8 +1753,9 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
         if (f.secoes        && f.secoes.length > 0)        initDD('secao',        f.secoes.filter(function(s){ return SECOES_EXCLUIR.indexOf(s) === -1; }));
         if (f.compradores   && f.compradores.length > 0)   initDD('comprador',    FILTROS_FIXOS.compradores);
         if (f.empresas      && f.empresas.length > 0) {
-          DD_DATA.empresa.all      = f.empresas;
-          DD_DATA.empresa.selected = new Set(f.empresas);
+          var empresasFiltradas = f.empresas.filter(function(e){ return e.toUpperCase() !== 'MATRIZ'; });
+          DD_DATA.empresa.all      = empresasFiltradas;
+          DD_DATA.empresa.selected = new Set(empresasFiltradas);
           renderDD('empresa');
           updateDDLabel('empresa');
         }
