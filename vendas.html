@@ -1199,13 +1199,18 @@ function carregarGrafico() {
   .then(function(resp) {
     if (resp.error || !resp.dias || resp.dias.length === 0) return;
 
+    const meta_mes = resp.meta_mes;
     const labels   = resp.dias.map(function(d) { return d.label; });
-    const vendas   = resp.dias.map(function(d) { return d.venda; });
-    const metas    = resp.dias.map(function(d) { return d.meta_dia; });
-    const atings   = resp.dias.map(function(d) { return d.ating; });
+    // Barras: null onde venda = 0 (dias sem dados não mostram barra)
+    const vendas   = resp.dias.map(function(d) { return d.venda > 0 ? d.venda : null; });
+    // Meta: linha plana no valor total do mês (igual para todos os dias exibidos)
+    const metas    = resp.dias.map(function() { return meta_mes; });
+    // Ating acumulado: venda_dia / meta_mes * 100 (só onde há venda)
+    const atings   = resp.dias.map(function(d) {
+      return (d.venda > 0 && meta_mes > 0) ? Math.round(d.venda / meta_mes * 100 * 10) / 10 : null;
+    });
 
     const ctx = document.getElementById('chart-ating').getContext('2d');
-
     if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
 
     _chartAting = new Chart(ctx, {
@@ -1216,8 +1221,8 @@ function carregarGrafico() {
             type: 'bar',
             label: 'Venda R$',
             data: vendas,
-            backgroundColor: 'rgba(41,128,185,0.15)',
-            borderColor: 'rgba(41,128,185,0.3)',
+            backgroundColor: 'rgba(41,128,185,0.18)',
+            borderColor: 'rgba(41,128,185,0.35)',
             borderWidth: 1,
             borderRadius: 4,
             yAxisID: 'y',
@@ -1225,7 +1230,7 @@ function carregarGrafico() {
           },
           {
             type: 'line',
-            label: 'Meta Diária R$',
+            label: 'Meta Mês R$',
             data: metas,
             borderColor: '#e74c3c',
             borderWidth: 1.5,
@@ -1247,7 +1252,7 @@ function carregarGrafico() {
             tension: 0.3,
             yAxisID: 'y2',
             order: 1,
-            datalabels: { display: true },
+            spanGaps: false,
           },
         ]
       },
@@ -1259,10 +1264,10 @@ function carregarGrafico() {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: function(ctx) {
-                if (ctx.dataset.label === 'Ating %') return ' Ating: ' + ctx.parsed.y.toFixed(1) + '%';
-                if (ctx.dataset.label === 'Meta Diária R$') return ' Meta/dia: R$ ' + Number(ctx.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0});
-                return ' Venda: R$ ' + Number(ctx.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0});
+              label: function(c) {
+                if (c.dataset.label === 'Ating %')    return c.parsed.y != null ? ' Ating: ' + c.parsed.y.toFixed(1) + '%' : null;
+                if (c.dataset.label === 'Meta Mês R$') return ' Meta mês: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0});
+                return c.parsed.y != null ? ' Venda: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0}) : null;
               }
             }
           }
@@ -1274,44 +1279,29 @@ function carregarGrafico() {
             ticks: { font: { size: 11 }, color: '#888' }
           },
           y: {
-            position: 'left',
+            display: false,
             grid: { display: false },
-            border: { display: false },
-            ticks: {
-              font: { size: 10 }, color: '#bbb',
-              callback: function(v) {
-                if (v >= 1000000) return 'R$ ' + (v/1000000).toFixed(1) + 'M';
-                if (v >= 1000) return 'R$ ' + (v/1000).toFixed(0) + 'k';
-                return 'R$ ' + v;
-              }
-            }
           },
           y2: {
-            position: 'right',
+            display: false,
             grid: { display: false },
-            border: { display: false },
-            ticks: {
-              font: { size: 10 }, color: '#27ae60',
-              callback: function(v) { return v + '%'; }
-            }
           }
         },
-        // Rótulos de atingimento em cima da linha verde
         animation: {
           onComplete: function() {
             const chart = this;
-            const ds = chart.data.datasets[2];  // Ating % line
-            const meta = chart.getDatasetMeta(2);
+            const dsMeta = chart.getDatasetMeta(2);  // linha ating
+            const dsData = chart.data.datasets[2].data;
             const ctx2 = chart.ctx;
             ctx2.save();
             ctx2.font = 'bold 11px Arial';
             ctx2.textAlign = 'center';
-            meta.data.forEach(function(pt, i) {
-              const val = ds.data[i];
+            dsMeta.data.forEach(function(pt, i) {
+              const val = dsData[i];
               if (val == null) return;
               const color = val >= 100 ? '#27ae60' : val >= 95 ? '#e6c200' : '#e74c3c';
               ctx2.fillStyle = color;
-              ctx2.fillText(val.toFixed(0) + '%', pt.x, pt.y - 8);
+              ctx2.fillText(val.toFixed(1) + '%', pt.x, pt.y - 9);
             });
             ctx2.restore();
           }

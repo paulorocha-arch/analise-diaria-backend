@@ -887,17 +887,14 @@ def api_atingimento_diario():
         rows_v, rows_m = _run_async_all(
             _hypercube(APP_FAROL, ["Dia"],
                        [f"Sum({set_v} #Medida1)"], rows=200),
-            _hypercube(APP_FAROL, [],
-                       [f"Sum({set_m_mes} #Medida1)"], rows=1),
+            _hypercube(APP_FAROL, ["Empresa"],
+                       [f"Sum({set_m_mes} #Medida1)"], rows=200),
         )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    # Meta total do mês → meta diária (linha plana)
-    meta_mes = 0.0
-    if rows_m:
-        meta_mes = _float(rows_m[0].get("_m0", "0"))
-    meta_dia = round(meta_mes / dias_no_mes, 2) if dias_no_mes > 0 else 0.0
+    # Meta total do mês = soma de todas as empresas (linha plana)
+    meta_mes = sum(_float(r.get("_m0", "0")) for r in rows_m if r.get("Empresa", "").strip())
 
     # Mapa dia → venda
     venda_por_dia = {}
@@ -921,10 +918,8 @@ def api_atingimento_diario():
             label = f"{d:02d}/{dias_sem[wd]}"
         except Exception:
             label = f"{d:02d}"
-        ating = round((venda / meta_dia) * 100, 1) if meta_dia > 0 else 0.0
         resultado.append({
-            "dia": d, "label": label,
-            "venda": venda, "meta_dia": meta_dia, "ating": ating
+            "dia": d, "label": label, "venda": venda,
         })
 
     return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
