@@ -348,8 +348,10 @@ def _set_extra(compradores, departamentos, secoes):
 
 @app.route("/api/health")
 def health():
+    routes = sorted(r.rule for r in app.url_map.iter_rules())
     return jsonify({"status": "ok", "tenant": TENANT,
-                    "api_key": bool(API_KEY), "firestore": FIREBASE_OK})
+                    "api_key": bool(API_KEY), "firestore": FIREBASE_OK,
+                    "routes": routes})
 
 
 @app.route("/api/filtros")
