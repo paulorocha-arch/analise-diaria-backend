@@ -354,6 +354,90 @@ def health():
                     "routes": routes})
 
 
+@app.route("/api/drill", methods=["POST"])
+def api_drill():
+    """
+    Drill-down: Departamento > Seção para uma empresa específica.
+    Usa Firestore (farol_granular). Rota curta para evitar conflitos de proxy.
+    """
+    body          = request.json or {}
+    empresa       = body.get("empresa", "")
+    ano           = int(body.get("ano",  datetime.now().year))
+    mes           = int(body.get("mes",  datetime.now().month))
+    dia_ini       = int(body.get("dia_ini", 1))
+    dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
+    compradores_f = set(body.get("compradores",   []))
+    departamentos = set(body.get("departamentos", []))
+    secoes_f      = set(body.get("secoes",        []))
+
+    if not empresa:
+        return jsonify({"error": "empresa obrigatória"}), 400
+    if dia_ini > dia_fim:
+        dia_ini, dia_fim = dia_fim, dia_ini
+
+    mem_key = json.dumps({
+        "drill": True, "empresa": empresa,
+        "ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
+        "compradores": sorted(compradores_f),
+        "departamentos": sorted(departamentos), "secoes": sorted(secoes_f),
+    }, sort_keys=True)
+    mem = _mem_get(mem_key)
+    if mem:
+        return jsonify(mem)
+
+    try:
+        rows = _ler_farol("farol_granular", ano, mes, dia_ini, dia_fim)
+    except Exception as e:
+        return jsonify({"error": f"Firestore: {e}"}), 500
+
+    if not rows:
+        return jsonify({"empresa": empresa, "data": []})
+
+    rows = [r for r in rows if r.get("empresa") == empresa]
+    if compradores_f:
+        rows = [r for r in rows if r.get("comprador") in compradores_f]
+    if departamentos:
+        rows = [r for r in rows if r.get("departamento") in departamentos]
+    if secoes_f:
+        rows = [r for r in rows if r.get("secao") in secoes_f]
+
+    from collections import defaultdict
+    deps = defaultdict(lambda: defaultdict(
+        lambda: {"venda": 0.0, "margem_pdv": 0.0, "nro_clientes": 0}
+    ))
+    for r in rows:
+        dept  = (r.get("departamento") or "").strip()
+        secao = (r.get("secao")        or "").strip()
+        if not dept:
+            continue
+        deps[dept][secao]["venda"]        += r.get("venda",        0)
+        deps[dept][secao]["margem_pdv"]   += r.get("margem_pdv",   0)
+        deps[dept][secao]["nro_clientes"] += r.get("nro_clientes", 0)
+
+    result = []
+    for dept in sorted(deps):
+        secoes_list = []
+        for secao in sorted(deps[dept]):
+            s = deps[dept][secao]
+            secoes_list.append({
+                "secao":        secao,
+                "venda":        round(s["venda"],      2),
+                "margem_pdv":   round(s["margem_pdv"], 2),
+                "nro_clientes": s["nro_clientes"],
+            })
+        result.append({
+            "departamento": dept,
+            "venda":        round(sum(s["venda"]        for s in secoes_list), 2),
+            "margem_pdv":   round(sum(s["margem_pdv"]   for s in secoes_list), 2),
+            "nro_clientes": sum(s["nro_clientes"]        for s in secoes_list),
+            "secoes":       secoes_list,
+        })
+
+    payload = {"empresa": empresa, "data": result}
+    _mem_set(mem_key, payload)
+    return jsonify(payload)
+
+
 @app.route("/api/filtros")
 def api_filtros():
     """Retorna listas de filtros lidas diretamente do Firestore (farol_granular do último mês disponível)."""
