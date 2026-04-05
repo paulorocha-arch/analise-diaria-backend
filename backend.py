@@ -7,7 +7,7 @@ Iniciar: python backend.py
 
 import asyncio, base64, hashlib, json, os, sys, time
 from datetime import datetime, timezone
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import httpx, websockets
 
@@ -345,6 +345,14 @@ def _set_extra(compradores, departamentos, secoes):
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.route("/")
+@app.route("/<path:filename>")
+def serve_static(filename="index.html"):
+    """Serve arquivos estáticos para desenvolvimento local."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base, filename)
+
 
 @app.route("/api/health")
 def health():

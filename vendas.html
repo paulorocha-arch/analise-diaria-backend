@@ -920,7 +920,9 @@ function pctColor(v) {
   return '#e74c3c';
 }
 
-const BACKEND_URL = 'https://analise-diaria-backend.onrender.com';
+const BACKEND_URL = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  ? 'http://localhost:5001'
+  : 'https://analise-diaria-backend.onrender.com';
 
 function carregarDados() {
   const tbody = document.getElementById('tabela-lojas');
