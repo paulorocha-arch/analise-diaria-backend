@@ -942,7 +942,11 @@ function fmtMoeda(v) {
 }
 function fmtPct(v) {
   if (v == null || isNaN(v)) return '—';
-  return Number(v).toFixed(1) + '%';
+  return Number(v).toFixed(2) + '%';
+}
+function fmtTicket(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function pctClass(v) {
   if (v >= 100) return 'ok';
@@ -999,7 +1003,7 @@ function carregarDados() {
     document.getElementById('kpi-prog-venda').textContent  = fmtPct(t.prog_venda_ml);
     document.getElementById('kpi-clientes').textContent       = Number(t.nro_clientes).toLocaleString('pt-BR');
     document.getElementById('kpi-clientes-cresc').textContent = fmtPct(t.cresc_cl);
-    document.getElementById('kpi-ticket-medio').textContent   = fmtMoeda(t.ticket_medio);
+    document.getElementById('kpi-ticket-medio').textContent   = fmtTicket(t.ticket_medio);
     document.getElementById('kpi-ticket-cresc').textContent   = fmtPct(t.cresc_tm);
     document.getElementById('kpi-margem').textContent         = fmtMoeda(t.margem_pdv);
     document.getElementById('kpi-margem-meta').textContent    = fmtMoeda(t.meta_margem);
@@ -1030,7 +1034,7 @@ function carregarDados() {
         '<td class="num ' + (r.desvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(r.desvio) + '</td>' +
         '<td class="num">' + Number(r.nro_clientes).toLocaleString('pt-BR') + '</td>' +
         '<td class="num ' + (r.prog_cl_ml >= 0 ? 'ok' : 'bad') + '">' + fmtPct(r.prog_cl_ml) + '</td>' +
-        '<td class="num">' + fmtMoeda(r.ticket_medio) + '</td>' +
+        '<td class="num">' + fmtTicket(r.ticket_medio) + '</td>' +
         '<td class="num ' + (r.prog_tm_ml >= 0 ? 'ok' : 'bad') + '">' + fmtPct(r.prog_tm_ml) + '</td>' +
         '<td class="num ' + pctClass(r.prog_venda_ml) + '">' + fmtPct(r.prog_venda_ml) + '</td>' +
         '<td class="num ' + pctClass(r.ating) + '">' + fmtPct(r.ating) + '</td>' +
@@ -1159,7 +1163,7 @@ function renderDrill(empId, lojaRow, deptData) {
       '<td class="num ' + (dDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(dDesvio) + '</td>' +
       '<td class="num">' + Number(dept.nro_clientes).toLocaleString('pt-BR') + '</td>' +
       '<td class="num">—</td>' +
-      '<td class="num">' + fmtMoeda(dTM) + '</td>' +
+      '<td class="num">' + fmtTicket(dTM) + '</td>' +
       '<td class="num">—</td>' +
       '<td class="num ' + pctClass(dProg) + '">' + fmtPct(dProg) + '</td>' +
       '<td class="num ' + pctClass(dAting) + '">' + fmtPct(dAting) + '</td>';
@@ -1204,7 +1208,7 @@ function toggleSecoes(deptKey, btn) {
       '<td class="num ' + (sDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(sDesvio) + '</td>' +
       '<td class="num">' + Number(s.nro_clientes).toLocaleString('pt-BR') + '</td>' +
       '<td class="num">—</td>' +
-      '<td class="num">' + fmtMoeda(sTM) + '</td>' +
+      '<td class="num">' + fmtTicket(sTM) + '</td>' +
       '<td class="num">—</td>' +
       '<td class="num ' + pctClass(sProg) + '">' + fmtPct(sProg) + '</td>' +
       '<td class="num ' + pctClass(sAting) + '">' + fmtPct(sAting) + '</td>';
