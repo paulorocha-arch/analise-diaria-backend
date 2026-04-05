@@ -279,6 +279,27 @@
     .pct-text.warn { color: #e67e22; }
     .pct-text.bad  { color: #e74c3c; }
 
+    /* DRILL-DOWN ROWS */
+    .btn-drill {
+      background: none; border: none; cursor: pointer;
+      color: #2980b9; padding: 2px 6px 2px 0; font-size: 13px;
+      line-height: 1; transition: transform .15s;
+      vertical-align: middle;
+    }
+    .btn-drill.open { transform: rotate(90deg); }
+    .btn-drill:hover { color: #1a5f7a; }
+
+    tr.dept-row td { background: #f4f8fc; border-bottom: 1px solid #eaf0f8; }
+    tr.dept-row td:first-child { padding-left: 32px; }
+    tr.dept-row:hover td { background: #eaf0f8; }
+
+    tr.secao-row td { background: #fafcff; border-bottom: 1px solid #f0f4fa; }
+    tr.secao-row td:first-child { padding-left: 56px; color: #555; font-size: 12px; }
+    tr.secao-row:hover td { background: #f0f4fa; }
+
+    .drill-loading td { text-align: center; padding: 10px; color: #aaa;
+      font-size: 12px; background: #f8fafc; }
+
     /* EMPTY STATE */
     .empty-state {
       display: flex; flex-direction: column; align-items: center;
@@ -894,12 +915,13 @@ document.addEventListener('click', function(e) {
 });
 
 /* DADOS — escuta eventos dos filtros */
-window.addEventListener('filtro:data',         function() { carregarDados(); });
-window.addEventListener('filtro:bandeira',     function() { carregarDados(); });
-window.addEventListener('filtro:empresa',      function() { carregarDados(); });
-window.addEventListener('filtro:departamento', function() { carregarDados(); });
-window.addEventListener('filtro:secao',        function() { carregarDados(); });
-window.addEventListener('filtro:comprador',    function() { carregarDados(); });
+function onFiltroChange() { _drillCache = {}; carregarDados(); }
+window.addEventListener('filtro:data',         onFiltroChange);
+window.addEventListener('filtro:bandeira',     onFiltroChange);
+window.addEventListener('filtro:empresa',      onFiltroChange);
+window.addEventListener('filtro:departamento', onFiltroChange);
+window.addEventListener('filtro:secao',        onFiltroChange);
+window.addEventListener('filtro:comprador',    onFiltroChange);
 
 function fmtMoeda(v) {
   if (v == null || isNaN(v)) return '—';
@@ -920,9 +942,7 @@ function pctColor(v) {
   return '#e74c3c';
 }
 
-const BACKEND_URL = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
-  ? 'http://localhost:5001'
-  : 'https://analise-diaria-backend.onrender.com';
+const BACKEND_URL = 'https://analise-diaria-backend.onrender.com';
 
 function carregarDados() {
   const tbody = document.getElementById('tabela-lojas');
@@ -990,8 +1010,14 @@ function carregarDados() {
       return;
     }
     tbody.innerHTML = rows.map(function(r) {
-      return '<tr>' +
-        '<td>' + r.empresa + '</td>' +
+      var empId = r.empresa.replace(/[^a-zA-Z0-9]/g, '_');
+      return '<tr class="loja-row" data-emp="' + r.empresa + '">' +
+        '<td>' +
+          '<button class="btn-drill" id="drill-btn-' + empId + '" ' +
+            'onclick="toggleDrill(\'' + r.empresa.replace(/'/g,"&#39;") + '\',this)" ' +
+            'title="Ver por Departamento">&#9654;</button>' +
+          r.empresa +
+        '</td>' +
         '<td class="num">' + fmtMoeda(r.meta_venda) + '</td>' +
         '<td class="num">' + fmtMoeda(r.venda) + '</td>' +
         '<td class="num ' + (r.desvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(r.desvio) + '</td>' +
@@ -1006,6 +1032,150 @@ function carregarDados() {
   })
   .catch(function(err) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#e74c3c;">Erro ao conectar ao backend: ' + err.message + '</td></tr>';
+  });
+}
+
+// ── Drill-down: Loja → Departamento → Seção ──────────────────────────────────
+var _drillCache = {};   // empresa → {data:[...]}
+var _drillOpen  = {};   // empresa → bool
+
+function toggleDrill(empresa, btn) {
+  var empId = empresa.replace(/[^a-zA-Z0-9]/g, '_');
+  var isOpen = btn.classList.toggle('open');
+
+  // Remove linhas existentes de drill para esta empresa
+  document.querySelectorAll('[data-drill-parent="' + empId + '"]').forEach(function(tr) {
+    tr.remove();
+  });
+
+  if (!isOpen) return;  // fechou — só remover
+
+  // Linha âncora (a loja)
+  var anchor = document.querySelector('tr.loja-row[data-emp="' + empresa + '"]');
+  if (!anchor) return;
+
+  // Mostra spinner de loading
+  var loadTr = document.createElement('tr');
+  loadTr.className = 'drill-loading';
+  loadTr.setAttribute('data-drill-parent', empId);
+  loadTr.innerHTML = '<td colspan="10"><span class="spinner-inline"></span>Carregando departamentos...</td>';
+  anchor.after(loadTr);
+
+  // Usa cache se disponível
+  if (_drillCache[empresa]) {
+    loadTr.remove();
+    renderDrill(empresa, empId, anchor, _drillCache[empresa]);
+    return;
+  }
+
+  // Monta parâmetros com os filtros ativos atuais
+  var ano    = rangeStart ? rangeStart.getFullYear()   : new Date().getFullYear();
+  var mes    = rangeStart ? rangeStart.getMonth() + 1  : new Date().getMonth() + 1;
+  var diaIni = rangeStart ? rangeStart.getDate() : 1;
+  var diaFim = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
+  var compradores_f = sel('comprador');
+  var departamentos = sel('departamento');
+  var secoes        = sel('secao');
+
+  fetch(BACKEND_URL + '/api/vendas/drill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      empresa: empresa,
+      ano: ano, mes: mes, dia_ini: diaIni, dia_fim: diaFim,
+      compradores: compradores_f, departamentos: departamentos, secoes: secoes
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(resp) {
+    loadTr.remove();
+    if (resp.error) {
+      var errTr = document.createElement('tr');
+      errTr.className = 'drill-loading';
+      errTr.setAttribute('data-drill-parent', empId);
+      errTr.innerHTML = '<td colspan="10" style="color:#e74c3c;">' + resp.error + '</td>';
+      anchor.after(errTr);
+      return;
+    }
+    _drillCache[empresa] = resp.data;
+    renderDrill(empresa, empId, anchor, resp.data);
+  })
+  .catch(function(err) {
+    loadTr.remove();
+    var errTr = document.createElement('tr');
+    errTr.className = 'drill-loading';
+    errTr.setAttribute('data-drill-parent', empId);
+    errTr.innerHTML = '<td colspan="10" style="color:#e74c3c;">Erro: ' + err.message + '</td>';
+    anchor.after(errTr);
+  });
+}
+
+function renderDrill(empresa, empId, lojaRow, deptData) {
+  // Insere dept rows após a linha da loja (em ordem reversa para manter sequência)
+  var insertAfter = lojaRow;
+  deptData.forEach(function(dept) {
+    var deptKey = empId + '_' + dept.departamento.replace(/[^a-zA-Z0-9]/g, '_');
+    var deptTr = document.createElement('tr');
+    deptTr.className = 'dept-row';
+    deptTr.setAttribute('data-drill-parent', empId);
+    deptTr.setAttribute('data-dept-key', deptKey);
+    deptTr.innerHTML =
+      '<td>' +
+        '<button class="btn-drill" id="drill-dept-' + deptKey + '" ' +
+          'onclick="toggleSecoes(\'' + deptKey + '\',this)" ' +
+          'title="Ver por Seção">&#9654;</button>' +
+        dept.departamento +
+      '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">' + fmtMoeda(dept.venda) + '</td>' +
+      '<td class="num ' + (dept.venda >= 0 ? '' : 'bad') + '">—</td>' +
+      '<td class="num">' + Number(dept.nro_clientes).toLocaleString('pt-BR') + '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>';
+
+    // Guarda seções no dataset para acesso rápido
+    deptTr.dataset.secoes = JSON.stringify(dept.secoes);
+
+    insertAfter.after(deptTr);
+    insertAfter = deptTr;
+  });
+}
+
+function toggleSecoes(deptKey, btn) {
+  var isOpen = btn.classList.toggle('open');
+
+  // Remove linhas de seção existentes
+  document.querySelectorAll('[data-secao-parent="' + deptKey + '"]').forEach(function(tr) {
+    tr.remove();
+  });
+  if (!isOpen) return;
+
+  var deptTr = document.querySelector('[data-dept-key="' + deptKey + '"]');
+  if (!deptTr) return;
+
+  var secoes = JSON.parse(deptTr.dataset.secoes || '[]');
+  var insertAfter = deptTr;
+
+  secoes.forEach(function(s) {
+    var tr = document.createElement('tr');
+    tr.className = 'secao-row';
+    tr.setAttribute('data-secao-parent', deptKey);
+    tr.innerHTML =
+      '<td>' + (s.secao || '—') + '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">' + fmtMoeda(s.venda) + '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">' + Number(s.nro_clientes).toLocaleString('pt-BR') + '</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>' +
+      '<td class="num">—</td>';
+    insertAfter.after(tr);
+    insertAfter = tr;
   });
 }
 
