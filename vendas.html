@@ -257,6 +257,49 @@
     .ating-badge.ating-warn { color: #ffe000; border-color: #ffe000; background: rgba(255,224,0,0.08); }
     .ating-badge.ating-bad  { color: #ff1744; border-color: #ff1744; background: rgba(255,23,68,0.08); }
 
+    /* SUMÁRIO EXECUTIVO */
+    .sumario-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .sumario-block {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+    .sumario-block-header {
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .sumario-block-header .sb-title {
+      font-size: 12px; font-weight: 700; color: #1a1a2e; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .sumario-block-header .sb-badge {
+      margin-left: auto; font-size: 11px; font-weight: 700;
+      background: rgba(231,76,60,0.10); color: #e74c3c;
+      padding: 2px 8px; border-radius: 20px;
+    }
+    .sumario-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .sumario-table thead tr { background: #f8f9fb; }
+    .sumario-table thead th {
+      padding: 7px 10px; text-align: left; font-weight: 600;
+      color: #888; font-size: 11px; white-space: nowrap;
+    }
+    .sumario-table thead th.num { text-align: right; }
+    .sumario-table tbody tr { border-top: 1px solid #f5f5f5; transition: background .1s; }
+    .sumario-table tbody tr:hover { background: #f8f9fb; }
+    .sumario-table tbody td { padding: 7px 10px; color: #333; white-space: nowrap; }
+    .sumario-table tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .sumario-table tbody td.nome { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+    .sumario-table .desvio-neg { color: #e74c3c; font-weight: 600; }
+    .sumario-rank { display: inline-block; width: 18px; text-align: center; font-weight: 700; color: #bbb; font-size: 11px; }
+    .sumario-rank.top3 { color: #e74c3c; }
+    .sumario-empty { padding: 24px; text-align: center; color: #bbb; font-size: 12px; }
+
     /* CHART CARD */
     .chart-card {
       background: #fff;
@@ -678,6 +721,55 @@
 
     </div>
 
+    <!-- Sumário Executivo -->
+    <div class="section-header">
+      <span class="section-title">Sumário Executivo — Maiores Desvios</span>
+    </div>
+    <div class="sumario-grid">
+      <!-- Lojas -->
+      <div class="sumario-block">
+        <div class="sumario-block-header">
+          <span class="sb-title">Por Loja</span>
+          <span class="sb-badge" id="sumario-lojas-badge">—</span>
+        </div>
+        <table class="sumario-table">
+          <thead><tr>
+            <th>#</th><th>Loja</th>
+            <th class="num">Desvio R$</th><th class="num">Ating %</th>
+          </tr></thead>
+          <tbody id="sumario-lojas"><tr><td colspan="4" class="sumario-empty">Carregando...</td></tr></tbody>
+        </table>
+      </div>
+      <!-- Seções -->
+      <div class="sumario-block">
+        <div class="sumario-block-header">
+          <span class="sb-title">Por Seção</span>
+          <span class="sb-badge" id="sumario-secoes-badge">—</span>
+        </div>
+        <table class="sumario-table">
+          <thead><tr>
+            <th>#</th><th>Seção</th>
+            <th class="num">Desvio R$</th><th class="num">Ating %</th>
+          </tr></thead>
+          <tbody id="sumario-secoes"><tr><td colspan="4" class="sumario-empty">Carregando...</td></tr></tbody>
+        </table>
+      </div>
+      <!-- Compradores -->
+      <div class="sumario-block">
+        <div class="sumario-block-header">
+          <span class="sb-title">Por Comprador</span>
+          <span class="sb-badge" id="sumario-compradores-badge">—</span>
+        </div>
+        <table class="sumario-table">
+          <thead><tr>
+            <th>#</th><th>Comprador</th>
+            <th class="num">Desvio R$</th><th class="num">Ating %</th>
+          </tr></thead>
+          <tbody id="sumario-compradores"><tr><td colspan="4" class="sumario-empty">Carregando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Gráfico Atingimento por Dia -->
     <div class="section-header">
       <span class="section-title">Atingimento por Dia</span>
@@ -1035,7 +1127,7 @@ window.addEventListener('filtro:departamento', function() {
 });
 
 /* DADOS — escuta eventos dos filtros */
-function onFiltroChange() { _drillCache = {}; carregarDados(); carregarGrafico(); }
+function onFiltroChange() { _drillCache = {}; carregarDados(); carregarGrafico(); carregarSumario(); }
 window.addEventListener('filtro:data',         onFiltroChange);
 window.addEventListener('filtro:bandeira',     onFiltroChange);
 window.addEventListener('filtro:empresa',      onFiltroChange);
@@ -1136,6 +1228,7 @@ function carregarDados() {
       tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#aaa;">Nenhuma loja encontrada.</td></tr>';
       return;
     }
+    atualizarSumarioLojas(rows);
     var totalRow = '<tr class="totais-row">' +
       '<td><strong>Totais</strong></td>' +
       '<td class="num"><strong>' + fmtMoeda(t.meta_venda)   + '</strong></td>' +
@@ -1172,6 +1265,79 @@ function carregarDados() {
   .catch(function(err) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#e74c3c;">Erro ao conectar ao backend: ' + err.message + '</td></tr>';
   });
+}
+
+// ── Sumário Executivo ────────────────────────────────────────────────────────
+function renderSumarioLojas(rows) {
+  var tbody = document.getElementById('sumario-lojas');
+  var badge = document.getElementById('sumario-lojas-badge');
+  var neg = rows.filter(function(r) { return r.desvio < 0; });
+  badge.textContent = neg.length + ' lojas c/ desvio negativo';
+  if (!neg.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="sumario-empty">Nenhum desvio negativo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = neg.slice(0, 15).map(function(r, i) {
+    return '<tr>' +
+      '<td><span class="sumario-rank' + (i < 3 ? ' top3' : '') + '">' + (i+1) + '</span></td>' +
+      '<td class="nome">' + r.empresa + '</td>' +
+      '<td class="num desvio-neg">' + fmtMoeda(r.desvio) + '</td>' +
+      '<td class="num">' + fmtAting(r.ating) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderSumarioItems(tbodyId, badgeId, label, items) {
+  var tbody = document.getElementById(tbodyId);
+  var badge = document.getElementById(badgeId);
+  var neg = items.filter(function(r) { return r.desvio < 0; });
+  badge.textContent = neg.length + ' ' + label + ' c/ desvio negativo';
+  if (!neg.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="sumario-empty">Nenhum desvio negativo</td></tr>';
+    return;
+  }
+  tbody.innerHTML = neg.slice(0, 15).map(function(r, i) {
+    return '<tr>' +
+      '<td><span class="sumario-rank' + (i < 3 ? ' top3' : '') + '">' + (i+1) + '</span></td>' +
+      '<td class="nome" title="' + r.nome + '">' + r.nome + '</td>' +
+      '<td class="num desvio-neg">' + fmtMoeda(r.desvio) + '</td>' +
+      '<td class="num">' + fmtAting(r.ating) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function carregarSumario() {
+  var ano    = rangeStart ? rangeStart.getFullYear()  : new Date().getFullYear();
+  var mes    = rangeStart ? rangeStart.getMonth() + 1 : new Date().getMonth() + 1;
+  var diaIni = rangeStart ? rangeStart.getDate() : 1;
+  var diaFim = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
+
+  fetch(BACKEND_URL + '/api/desvios', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ano: ano, mes: mes, dia_ini: diaIni, dia_fim: diaFim,
+      bandeiras:     sel('bandeira'),
+      empresas:      sel('empresa'),
+      compradores:   sel('comprador'),
+      departamentos: sel('departamento'),
+      secoes:        sel('secao'),
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(resp) {
+    if (resp.error) return;
+    renderSumarioItems('sumario-secoes',      'sumario-secoes-badge',      'seções',     resp.secoes);
+    renderSumarioItems('sumario-compradores', 'sumario-compradores-badge', 'compradores', resp.compradores);
+  })
+  .catch(function() {});
+}
+
+// Chamado por carregarDados() quando recebe os dados de lojas
+function atualizarSumarioLojas(respData) {
+  var neg = respData.filter(function(r) { return r.desvio < 0; });
+  neg.sort(function(a, b) { return a.desvio - b.desvio; });
+  renderSumarioLojas(neg);
 }
 
 // ── Gráfico Atingimento por Dia ──────────────────────────────────────────────
@@ -1555,7 +1721,7 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
     if (acordado) return;
     acordado = true;
     // Carrega filtros primeiro, depois os dados
-    atualizarFiltros(function() { carregarDados(); carregarGrafico(); });
+    atualizarFiltros(function() { carregarDados(); carregarGrafico(); carregarSumario(); });
   }
 
   fetch(BACKEND_URL + '/api/health')

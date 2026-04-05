@@ -936,6 +936,99 @@ def api_atingimento_diario():
     return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
 
 
+@app.route("/api/desvios", methods=["POST"])
+def api_desvios():
+    """
+    Ranking de maiores desvios negativos por Seção e Comprador.
+    Parâmetros: mesmo body do /api/vendas.
+    """
+    from calendar import monthrange
+
+    body          = request.json or {}
+    ano           = int(body.get("ano",  datetime.now().year))
+    mes           = int(body.get("mes",  datetime.now().month))
+    dia_ini       = int(body.get("dia_ini", 1))
+    dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
+    empresas_f    = body.get("empresas",      [])
+    bandeiras_f   = body.get("bandeiras",     [])
+    compradores_f = body.get("compradores",   [])
+    departamentos = body.get("departamentos", [])
+    secoes        = body.get("secoes",        [])
+
+    if dia_ini > dia_fim:
+        dia_ini, dia_fim = dia_fim, dia_ini
+
+    extra_v = _set_extra(compradores_f, departamentos, secoes)
+    extra_m = _set_extra([], departamentos, secoes)
+
+    emp_parts = []
+    if empresas_f:
+        vals = ",".join("'" + v + "'" for v in empresas_f)
+        emp_parts.append(f"Empresa={{{vals}}}")
+    if bandeiras_f:
+        vals = ",".join("'" + v + "'" for v in bandeiras_f)
+        emp_parts.append(f"Bandeira={{{vals}}}")
+    emp_extra = ("," + ",".join(emp_parts)) if emp_parts else ""
+
+    ma   = _mes_ano(ano, mes)
+    days = _days(dia_ini, dia_fim)
+
+    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_m}{emp_extra}>}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{extra_m}{emp_extra}>}}"
+
+    try:
+        rows_sec_v, rows_sec_m, rows_comp_v, rows_comp_m = _run_async_all(
+            _hypercube(APP_FAROL, ["Nível 2"],
+                       [f"Sum({set_v} #Medida1)", f"Count({set_v} Distinct ChaveNF)"], rows=500),
+            _hypercube(APP_FAROL, ["Nível 2"],
+                       [f"Sum({set_m} #Medida1)", f"Sum({set_m_mes} #Medida1)"], rows=500),
+            _hypercube(APP_FAROL, ["Comprador"],
+                       [f"Sum({set_v} #Medida1)", f"Count({set_v} Distinct ChaveNF)"], rows=500),
+            _hypercube(APP_FAROL, ["Comprador"],
+                       [f"Sum({set_m} #Medida1)", f"Sum({set_m_mes} #Medida1)"], rows=500),
+        )
+    except Exception as e:
+        return jsonify({"error": f"Qlik: {e}"}), 500
+
+    def _build_ranking(rows_v, rows_m, dim_key, top=20):
+        m_map = {}
+        for r in rows_m:
+            k = r.get(dim_key, "").strip()
+            if k:
+                m_map[k] = {
+                    "meta":     _float(r.get("_m0", "0")),
+                    "meta_mes": _float(r.get("_m1", "0")),
+                }
+        items = []
+        for r in rows_v:
+            k = r.get(dim_key, "").strip()
+            if not k or k in ("-", ""):
+                continue
+            venda = _float(r.get("_m0", "0"))
+            nc    = int(_float(r.get("_m1", "0")))
+            m     = m_map.get(k, {})
+            meta  = m.get("meta", 0)
+            meta_mes = m.get("meta_mes", 0)
+            desvio = round(venda - meta, 2)
+            ating  = round(venda / meta * 100, 2) if meta > 0 else 0
+            tm     = round(venda / nc, 2) if nc > 0 else 0
+            items.append({
+                "nome": k, "venda": round(venda, 2),
+                "meta": round(meta, 2), "meta_mes": round(meta_mes, 2),
+                "desvio": desvio, "ating": ating,
+                "nro_clientes": nc, "ticket_medio": tm,
+            })
+        # Ordena por desvio crescente (maiores negativos primeiro)
+        items.sort(key=lambda x: x["desvio"])
+        return items[:top]
+
+    secoes_rank    = _build_ranking(rows_sec_v,  rows_sec_m,  "Nível 2",   top=20)
+    compradores_rank = _build_ranking(rows_comp_v, rows_comp_m, "Comprador", top=20)
+
+    return jsonify({"secoes": secoes_rank, "compradores": compradores_rank})
+
+
 @app.route("/api/vendas/drill", methods=["POST"])
 def api_vendas_drill():
     """
