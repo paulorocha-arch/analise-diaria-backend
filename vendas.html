@@ -1199,16 +1199,20 @@ function carregarGrafico() {
   .then(function(resp) {
     if (resp.error || !resp.dias || resp.dias.length === 0) return;
 
-    const meta_dia = resp.meta_dia || 0;
-    const labels   = resp.dias.map(function(d) { return d.label; });
-    const vendas   = resp.dias.map(function(d) { return d.venda; });
-    // Barras cinza: meta/dia só onde não tem venda
-    const metaDias = resp.dias.map(function(d) { return (d.venda == null && meta_dia > 0) ? meta_dia : null; });
-    // Ating%: venda_dia / meta_dia × 100
-    const atings   = resp.dias.map(function(d) { return (d.venda != null && meta_dia > 0) ? Math.round(d.venda / meta_dia * 1000) / 10 : null; });
+    var meta_dia = resp.meta_dia || 0;
+    var labels   = resp.dias.map(function(d) { return d.label; });
+    var vendas   = resp.dias.map(function(d) { return d.venda; });        // null nos dias sem dados
+    var metas    = resp.dias.map(function()  { return meta_dia || null; }); // linha plana em meta/dia
 
-    const ctx = document.getElementById('chart-ating').getContext('2d');
+    var ctx = document.getElementById('chart-ating').getContext('2d');
     if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
+
+    function fmtBarLabel(v) {
+      if (v == null || v === 0) return null;
+      if (v >= 1000000) return Number(Math.round(v / 1000)).toLocaleString('pt-BR') + 'MM';
+      if (v >= 1000)    return Math.round(v / 1000).toLocaleString('pt-BR') + 'Mil';
+      return Number(v).toLocaleString('pt-BR');
+    }
 
     _chartAting = new Chart(ctx, {
       data: {
@@ -1222,32 +1226,17 @@ function carregarGrafico() {
             borderColor: 'rgba(41,128,185,0.45)',
             borderWidth: 1,
             borderRadius: 3,
-            yAxisID: 'y',
             order: 2,
           },
           {
-            type: 'bar',
-            label: 'Meta Dia R$',
-            data: metaDias,
-            backgroundColor: 'rgba(150,150,150,0.15)',
-            borderColor: 'rgba(150,150,150,0.30)',
-            borderWidth: 1,
-            borderRadius: 3,
-            yAxisID: 'y',
-            order: 3,
-          },
-          {
             type: 'line',
-            label: 'Ating %',
-            data: atings,
-            borderColor: '#27ae60',
-            borderWidth: 2,
-            pointBackgroundColor: '#27ae60',
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            tension: 0.3,
-            spanGaps: false,
-            yAxisID: 'y2',
+            label: 'Meta Dia R$',
+            data: metas,
+            borderColor: '#e74c3c',
+            borderWidth: 1.5,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            tension: 0,
             order: 1,
           },
         ]
@@ -1261,11 +1250,10 @@ function carregarGrafico() {
           tooltip: {
             callbacks: {
               label: function(c) {
-                if (c.dataset.label === 'Ating %')
-                  return c.parsed.y != null ? ' Ating: ' + c.parsed.y.toFixed(1) + '%' : null;
-                if (c.dataset.label === 'Meta Dia R$')
-                  return c.parsed.y != null ? ' Meta/dia: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0}) : null;
-                return c.parsed.y != null ? ' Venda: R$ ' + Number(c.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:0}) : null;
+                var v = c.parsed.y;
+                if (v == null) return null;
+                if (c.dataset.label === 'Meta Dia R$') return ' Meta/dia: R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
+                return ' Venda: R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
               }
             }
           }
@@ -1276,48 +1264,23 @@ function carregarGrafico() {
             border: { display: false },
             ticks: { font: { size: 10 }, color: '#888', maxRotation: 0 }
           },
-          y:  { display: false, beginAtZero: true },
-          y2: { display: false, beginAtZero: true, min: 0, max: 200 }
+          y: { display: false, beginAtZero: true }
         },
         animation: {
           onComplete: function() {
             var chart = this;
             var ctx2  = chart.ctx;
-            ctx2.save();
-
-            // Rótulos de valor nas barras de venda (dataset 0)
             var dsBars = chart.getDatasetMeta(0);
             var barData = chart.data.datasets[0].data;
+            ctx2.save();
             ctx2.font = 'bold 10px Arial';
             ctx2.textAlign = 'center';
             ctx2.fillStyle = '#2980b9';
             dsBars.data.forEach(function(bar, i) {
-              var v = barData[i];
-              if (v == null || v === 0) return;
-              var label;
-              if (v >= 1000000) {
-                label = Number(Math.round(v / 1000)).toLocaleString('pt-BR') + 'MM';
-              } else if (v >= 1000) {
-                label = Math.round(v / 1000).toLocaleString('pt-BR') + 'Mil';
-              } else {
-                label = Number(v).toLocaleString('pt-BR');
-              }
-              ctx2.fillText(label, bar.x, bar.y - 5);
+              var lbl = fmtBarLabel(barData[i]);
+              if (!lbl) return;
+              ctx2.fillText(lbl, bar.x, bar.y - 5);
             });
-
-            // Rótulos de ating% na linha verde (dataset 2)
-            var dsLine = chart.getDatasetMeta(2);
-            var atingData = chart.data.datasets[2].data;
-            ctx2.font = 'bold 11px Arial';
-            dsLine.data.forEach(function(pt, i) {
-              var val = atingData[i];
-              if (val == null) return;
-              var color = val >= 100 ? '#27ae60' : val >= 95 ? '#e6c200' : '#e74c3c';
-              ctx2.fillStyle = color;
-              ctx2.textAlign = 'center';
-              ctx2.fillText(val.toFixed(1) + '%', pt.x, pt.y - 9);
-            });
-
             ctx2.restore();
           }
         }
