@@ -907,20 +907,19 @@ def api_atingimento_diario():
         except Exception:
             pass
 
-    # Abreviações de dia da semana em PT-BR
+    # Eixo X = todos os dias do mês; barras só nos dias filtrados
     dias_sem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    dias_filtrados = set(range(dia_ini, dia_fim + 1))
 
     resultado = []
-    for d in range(dia_ini, dia_fim + 1):
-        venda = round(venda_por_dia.get(d, 0.0), 2)
+    for d in range(1, dias_no_mes + 1):
         try:
             wd = _dt.date(ano, mes, d).weekday()
             label = f"{d:02d}/{dias_sem[wd]}"
         except Exception:
             label = f"{d:02d}"
-        resultado.append({
-            "dia": d, "label": label, "venda": venda,
-        })
+        venda = round(venda_por_dia.get(d, 0.0), 2) if d in dias_filtrados else None
+        resultado.append({"dia": d, "label": label, "venda": venda})
 
     return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
 
