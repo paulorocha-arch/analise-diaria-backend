@@ -236,21 +236,17 @@
     .table-card tbody td.ok   { color: #27ae60; font-weight: 600; }
     .table-card tbody td.bad  { color: #e74c3c; font-weight: 600; }
     .table-card tbody td.warn { color: #e67e22; font-weight: 600; }
-    .table-card tbody td.ating-ok {
-      color: #00e676; font-weight: 700;
-      background: rgba(0, 230, 118, 0.12);
-      box-shadow: inset 0 0 8px rgba(0, 230, 118, 0.2);
+    .table-card tbody td.ating-ok,
+    .table-card tbody td.ating-warn,
+    .table-card tbody td.ating-bad { background: none; }
+    .ating-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px;
+      border: 1.5px solid; font-weight: 700; font-size: 12px;
     }
-    .table-card tbody td.ating-warn {
-      color: #ffe000; font-weight: 700;
-      background: rgba(255, 224, 0, 0.12);
-      box-shadow: inset 0 0 8px rgba(255, 224, 0, 0.2);
-    }
-    .table-card tbody td.ating-bad {
-      color: #ff1744; font-weight: 700;
-      background: rgba(255, 23, 68, 0.10);
-      box-shadow: inset 0 0 8px rgba(255, 23, 68, 0.2);
-    }
+    .ating-badge.ating-ok   { color: #00e676; border-color: #00e676; background: rgba(0,230,118,0.08); }
+    .ating-badge.ating-warn { color: #ffe000; border-color: #ffe000; background: rgba(255,224,0,0.08); }
+    .ating-badge.ating-bad  { color: #ff1744; border-color: #ff1744; background: rgba(255,23,68,0.08); }
 
     /* SECTION TITLE */
     .section-header {
@@ -981,6 +977,12 @@ function atingClass(v) {
   if (v >= 95)  return 'ating-warn';
   return 'ating-bad';
 }
+function fmtAting(v) {
+  if (v == null || isNaN(v)) return '—';
+  var cls = atingClass(v);
+  var arrow = cls === 'ating-ok' ? '&#8679;' : cls === 'ating-warn' ? '&#8212;' : '&#8681;';
+  return '<span class="ating-badge ' + cls + '">' + fmtPct(v) + ' ' + arrow + '</span>';
+}
 function pctColor(v) {
   if (v >= 100) return '#27ae60';
   if (v >= 80)  return '#e67e22';
@@ -1058,7 +1060,7 @@ function carregarDados() {
       '<td class="num"><strong>' + fmtTicket(t.ticket_medio) + '</strong></td>' +
       '<td class="num ' + (t.prog_tm_ml >= 0 ? 'ok' : 'bad') + '"><strong>' + fmtPct(t.prog_tm_ml) + '</strong></td>' +
       '<td class="num ' + pctClass(t.prog_venda_ml) + '"><strong>' + fmtPct(t.prog_venda_ml) + '</strong></td>' +
-      '<td class="num ' + atingClass(t.ating) + '"><strong>' + fmtPct(t.ating) + '</strong></td>' +
+      '<td class="num">' + fmtAting(t.ating) + '</td>' +
       '</tr>';
     tbody.innerHTML = totalRow + rows.map(function(r) {
       var empId = r.empresa.replace(/[^a-zA-Z0-9]/g, '_');
@@ -1077,7 +1079,7 @@ function carregarDados() {
         '<td class="num">' + fmtTicket(r.ticket_medio) + '</td>' +
         '<td class="num ' + (r.prog_tm_ml >= 0 ? 'ok' : 'bad') + '">' + fmtPct(r.prog_tm_ml) + '</td>' +
         '<td class="num ' + pctClass(r.prog_venda_ml) + '">' + fmtPct(r.prog_venda_ml) + '</td>' +
-        '<td class="num ' + atingClass(r.ating) + '">' + fmtPct(r.ating) + '</td>' +
+        '<td class="num">' + fmtAting(r.ating) + '</td>' +
         '</tr>';
     }).join('');
   })
@@ -1206,7 +1208,7 @@ function renderDrill(empId, lojaRow, deptData) {
       '<td class="num">' + fmtTicket(dTM) + '</td>' +
       '<td class="num ' + (dept.prog_tm_ml != null ? (dept.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (dept.prog_tm_ml != null ? fmtPct(dept.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(dProg) + '">' + fmtPct(dProg) + '</td>' +
-      '<td class="num ' + atingClass(dAting) + '">' + fmtPct(dAting) + '</td>';
+      '<td class="num">' + fmtAting(dAting) + '</td>';
 
     // Guarda seções no dataset para acesso rápido
     deptTr.dataset.secoes = JSON.stringify(dept.secoes);
@@ -1251,7 +1253,7 @@ function toggleSecoes(deptKey, btn) {
       '<td class="num">' + fmtTicket(sTM) + '</td>' +
       '<td class="num ' + (s.prog_tm_ml != null ? (s.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (s.prog_tm_ml != null ? fmtPct(s.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(sProg) + '">' + fmtPct(sProg) + '</td>' +
-      '<td class="num ' + atingClass(sAting) + '">' + fmtPct(sAting) + '</td>';
+      '<td class="num">' + fmtAting(sAting) + '</td>';
     insertAfter.after(tr);
     insertAfter = tr;
   });
