@@ -896,19 +896,17 @@ def api_atingimento_diario():
     # Meta total do mês → meta diária (linha plana)
     meta_mes = 0.0
     if rows_m:
-        try:
-            meta_mes = float(str(rows_m[0].get("#Medida1", "0")).replace(".", "").replace(",", "."))
-        except Exception:
-            meta_mes = 0.0
+        meta_mes = _float(rows_m[0].get("_m0", "0"))
     meta_dia = round(meta_mes / dias_no_mes, 2) if dias_no_mes > 0 else 0.0
 
     # Mapa dia → venda
     venda_por_dia = {}
     for r in rows_v:
         try:
-            d = int(str(r.get("Dia", "0")).replace(",", "").replace(".", ""))
-            v = float(str(r.get("#Medida1", "0")).replace(".", "").replace(",", "."))
-            venda_por_dia[d] = v
+            d = int(_float(r.get("Dia", "0")))
+            v = _float(r.get("_m0", "0"))
+            if d > 0:
+                venda_por_dia[d] = v
         except Exception:
             pass
 
