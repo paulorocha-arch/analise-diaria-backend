@@ -642,6 +642,7 @@ def api_vendas():
 
     # ── Build set expressions ────────────────────────────────────────────────
     extra_v = _set_extra(compradores_f, departamentos, secoes)
+    extra_m = _set_extra([], departamentos, secoes)   # metas: só dept/seção, sem comprador
 
     emp_parts = []
     if empresas_f:
@@ -657,8 +658,8 @@ def api_vendas():
     days     = _days(dia_ini, dia_fim)
 
     set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
-    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{emp_extra}>}}"
-    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_extra}>}}"
+    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_m}{emp_extra}>}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{extra_m}{emp_extra}>}}"
     set_prev  = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_prev}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
 
     # ── Consulta Qlik (3 hipercubos paralelos) ───────────────────────────────
