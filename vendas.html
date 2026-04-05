@@ -1183,6 +1183,24 @@ window.addEventListener('filtro:departamento', function() {
   });
 });
 
+/* Converte filtro de bandeira em lista de empresas (Bandeira não existe no Qlik) */
+function getEmpresasEfetivas() {
+  var bandeiras = sel('bandeira');
+  var empresas  = sel('empresa');
+  if (bandeiras.length === 0) return empresas;
+  // Derivar bandeira de cada empresa: começa com "BIG" → BIG BOX, senão → ULT
+  var todas = DD_DATA.empresa.all;
+  var filtered = todas.filter(function(e) {
+    var bnd = e.toUpperCase().startsWith('BIG') ? 'BIG BOX' : 'ULT';
+    return bandeiras.indexOf(bnd) >= 0;
+  });
+  // Se também há filtro de empresa, intersectar
+  if (empresas.length > 0) {
+    filtered = filtered.filter(function(e) { return empresas.indexOf(e) >= 0; });
+  }
+  return filtered;
+}
+
 /* DADOS — escuta eventos dos filtros */
 function onFiltroChange() { _drillCache = {}; carregarDados(); carregarGrafico(); carregarSumario(); }
 window.addEventListener('filtro:data',         onFiltroChange);
@@ -1236,8 +1254,6 @@ function carregarDados() {
   const diaIni  = rangeStart ? rangeStart.getDate() : 1;
   const diaFim  = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
 
-  const bandeiras     = sel('bandeira');
-  const empresas      = sel('empresa');
   const compradores_f = sel('comprador');
   const departamentos = sel('departamento');
   const secoes        = sel('secao');
@@ -1247,7 +1263,7 @@ function carregarDados() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ano, mes, dia_ini: diaIni, dia_fim: diaFim,
-      bandeiras, empresas,
+      bandeiras: [], empresas: getEmpresasEfetivas(),
       compradores: compradores_f,
       departamentos,
       secoes
@@ -1589,8 +1605,7 @@ function carregarSumario() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ano: ano, mes: mes, dia_ini: diaIni, dia_fim: diaFim,
-      bandeiras:     sel('bandeira'),
-      empresas:      sel('empresa'),
+      bandeiras:     [], empresas: getEmpresasEfetivas(),
       compradores:   sel('comprador'),
       departamentos: sel('departamento'),
       secoes:        sel('secao'),
@@ -1636,8 +1651,7 @@ function carregarGrafico() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ano, mes, dia_ini: diaIni, dia_fim: diaFim,
-      bandeiras:     sel('bandeira'),
-      empresas:      sel('empresa'),
+      bandeiras:     [], empresas: getEmpresasEfetivas(),
       compradores:   sel('comprador'),
       departamentos: sel('departamento'),
       secoes:        sel('secao'),
