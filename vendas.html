@@ -1361,6 +1361,15 @@ function _fmtImpacto(v) {
   return s + Number(abs).toLocaleString('pt-BR');
 }
 
+function _causa(cl, tm) {
+  if (cl < -5 && tm < -5) return 'Duplo impacto: menos clientes e ticket menor';
+  if (cl < -5)  return 'Principal causa: queda no fluxo de clientes';
+  if (tm < -5)  return 'Principal causa: queda no ticket médio';
+  if (cl < -2)  return 'Leve retração no fluxo de clientes';
+  if (tm < -2)  return 'Leve retração no ticket médio';
+  return 'Queda de venda sem retração de clientes ou ticket (meta elevada)';
+}
+
 function gerarDiagnostico(totais, rows, desviosResp) {
   var findings = [];
   var negRows = (rows || []).filter(function(r){ return r.desvio < 0; })
@@ -1369,114 +1378,162 @@ function gerarDiagnostico(totais, rows, desviosResp) {
   var tm = totais.prog_tm_ml || 0;
   var at = totais.ating || 0;
 
-  // 1. Atingimento geral
+  // ── 1. Atingimento geral ───────────────────────────────────────────────────
   if (at > 0 && at < 100) {
     findings.push({
       nivel: at < 85 ? 4 : at < 95 ? 3 : 2,
-      titulo: 'Venda ' + fmtPct(at) + ' da meta',
-      descricao: 'Desvio acumulado no período',
+      titulo: 'Atingimento geral: ' + fmtPct(at),
+      descricao: _causa(cl, tm),
       impacto: totais.desvio
     });
   }
 
-  // 2. Lojas críticas
-  var lojasCrit = (rows || []).filter(function(r){ return r.ating > 0 && r.ating < 85; });
-  if (lojasCrit.length) {
+  // ── 2. Loja com maior desvio ───────────────────────────────────────────────
+  if (negRows.length > 0) {
+    var pior = negRows[0];
+    var causaPior = _causa(pior.prog_cl_ml || 0, pior.prog_tm_ml || 0);
     findings.push({
-      nivel: 4,
-      titulo: lojasCrit.length + ' loja(s) abaixo de 85%',
-      descricao: lojasCrit.slice(0,3).map(function(r){ return r.empresa; }).join(' · '),
-      impacto: lojasCrit.reduce(function(s,r){ return s+r.desvio; }, 0)
+      nivel: pior.ating < 80 ? 4 : pior.ating < 90 ? 3 : 2,
+      titulo: pior.empresa + ' — pior loja (' + fmtPct(pior.ating) + ')',
+      descricao: causaPior + ' · ' + Number(pior.nro_clientes).toLocaleString('pt-BR') + ' clientes · TM ' + fmtTicket(pior.ticket_medio),
+      impacto: pior.desvio
     });
   }
 
-  // 3. Concentração do desvio
+  // ── 3. Concentração ────────────────────────────────────────────────────────
   if (negRows.length > 0 && totais.desvio < 0) {
     var top3sum = negRows.slice(0,3).reduce(function(s,r){ return s+r.desvio; }, 0);
     var pct = Math.abs(top3sum / totais.desvio * 100);
-    if (pct >= 55) {
+    if (pct >= 50) {
       findings.push({
         nivel: 3,
-        titulo: pct.toFixed(0) + '% do desvio em ' + Math.min(3, negRows.length) + ' loja(s)',
+        titulo: pct.toFixed(0) + '% do desvio concentrado em ' + Math.min(3, negRows.length) + ' loja(s)',
         descricao: negRows.slice(0,3).map(function(r){ return r.empresa; }).join(' · '),
         impacto: top3sum
       });
     }
   }
 
-  // 4. Queda simultânea tráfego + ticket
-  if (cl < -3 && tm < -3) {
+  // ── 4. Causa geral: duplo impacto ──────────────────────────────────────────
+  if (cl < -4 && tm < -4) {
     findings.push({
       nivel: 4,
-      titulo: 'Queda de tráfego e ticket simultâneos',
-      descricao: 'Clientes ' + cl.toFixed(1) + '% · Ticket ' + tm.toFixed(1) + '% vs ano anterior',
-      impacto: null, metrica: '⚠ Duplo impacto'
+      titulo: 'Duplo impacto: tráfego + ticket em queda',
+      descricao: 'Clientes ' + cl.toFixed(1) + '% · Ticket médio ' + tm.toFixed(1) + '% vs mesmo período do ano anterior',
+      impacto: null, metrica: '⚠ Crítico'
     });
   } else {
-    // 5. Tráfego
-    if (cl < -3) {
-      findings.push({
-        nivel: cl < -8 ? 3 : 2,
-        titulo: 'Tráfego de clientes em queda',
-        descricao: Number(totais.nro_clientes).toLocaleString('pt-BR') + ' clientes no período',
-        impacto: null, metrica: cl.toFixed(1) + '%'
-      });
-    }
-    // 6. Ticket Médio
-    if (tm < -3) {
-      findings.push({
-        nivel: tm < -8 ? 3 : 2,
-        titulo: 'Ticket médio abaixo do ano anterior',
-        descricao: 'Atual: ' + fmtTicket(totais.ticket_medio),
-        impacto: null, metrica: tm.toFixed(1) + '%'
-      });
-    }
-  }
-
-  // 7. Margem
-  var atMrg = totais.ating_margem || 0;
-  if (atMrg > 0 && atMrg < 95) {
-    var devMrg = (totais.margem_pdv || 0) - (totais.meta_margem || 0);
-    findings.push({
-      nivel: atMrg < 85 ? 3 : 2,
-      titulo: 'Margem ' + fmtPct(atMrg) + ' da meta',
-      descricao: 'Margem PDV: ' + _fmtImpacto(totais.margem_pdv),
-      impacto: devMrg
+    if (cl < -3) findings.push({
+      nivel: cl < -8 ? 3 : 2,
+      titulo: 'Queda no fluxo de clientes',
+      descricao: cl.toFixed(1) + '% vs ano anterior · ' + Number(totais.nro_clientes).toLocaleString('pt-BR') + ' clientes no período',
+      impacto: null, metrica: cl.toFixed(1) + '%'
+    });
+    if (tm < -3) findings.push({
+      nivel: tm < -8 ? 3 : 2,
+      titulo: 'Queda no ticket médio',
+      descricao: tm.toFixed(1) + '% vs ano anterior · Atual: R$ ' + fmtTicket(totais.ticket_medio),
+      impacto: null, metrica: tm.toFixed(1) + '%'
     });
   }
 
-  // 8. Seções
+  // ── 5. Departamentos ───────────────────────────────────────────────────────
+  if (desviosResp && desviosResp.departamentos) {
+    var depNeg = desviosResp.departamentos.filter(function(d){ return d.desvio < 0; });
+    depNeg.forEach(function(dep) {
+      var causaDep = _causa(dep.prog_cl_ml || 0, dep.prog_venda_ml || 0);
+      findings.push({
+        nivel: dep.ating < 85 ? 3 : 2,
+        titulo: 'Dept. ' + dep.nome + ' — ' + fmtPct(dep.ating),
+        descricao: causaDep + ' · ' + Number(dep.nro_clientes).toLocaleString('pt-BR') + ' clientes',
+        impacto: dep.desvio
+      });
+    });
+  }
+
+  // ── 6. Seções mais impactantes ─────────────────────────────────────────────
   if (desviosResp && desviosResp.secoes) {
     var secNeg = desviosResp.secoes.filter(function(s){ return s.desvio < 0; });
     if (secNeg.length) {
-      findings.push({
-        nivel: secNeg[0].ating < 85 ? 3 : 2,
-        titulo: secNeg.length + ' seção(ões) com desvio negativo',
-        descricao: secNeg.slice(0,3).map(function(s){ return s.nome; }).join(' · '),
-        impacto: secNeg.reduce(function(s,r){ return s+r.desvio; }, 0)
+      // Top 3 seções com maior desvio
+      secNeg.slice(0, 3).forEach(function(sec, i) {
+        findings.push({
+          nivel: sec.ating < 85 ? 3 : 2,
+          titulo: 'Seção ' + sec.nome + ' — ' + fmtPct(sec.ating),
+          descricao: _causa(sec.prog_cl_ml || 0, sec.prog_venda_ml || 0) + ' · ' + Number(sec.nro_clientes).toLocaleString('pt-BR') + ' clientes',
+          impacto: sec.desvio
+        });
       });
+      if (secNeg.length > 3) {
+        findings.push({
+          nivel: 1,
+          titulo: 'Mais ' + (secNeg.length - 3) + ' seção(ões) com desvio negativo',
+          descricao: secNeg.slice(3, 6).map(function(s){ return s.nome; }).join(' · '),
+          impacto: secNeg.slice(3).reduce(function(s,r){ return s+r.desvio; }, 0)
+        });
+      }
     }
   }
 
-  // 9. Comprador
+  // ── 7. Margem ──────────────────────────────────────────────────────────────
+  var atMrg = totais.ating_margem || 0;
+  if (atMrg > 0 && atMrg < 95) {
+    findings.push({
+      nivel: atMrg < 85 ? 3 : 2,
+      titulo: 'Margem PDV — ' + fmtPct(atMrg) + ' da meta',
+      descricao: 'Margem realizada: ' + _fmtImpacto(totais.margem_pdv) + ' · Meta: ' + _fmtImpacto(totais.meta_margem),
+      impacto: (totais.margem_pdv || 0) - (totais.meta_margem || 0)
+    });
+  }
+
+  // ── 8. Comprador crítico ───────────────────────────────────────────────────
   if (desviosResp && desviosResp.compradores) {
     var compNeg = desviosResp.compradores.filter(function(c){ return c.desvio < 0; });
     if (compNeg.length) {
       var top = compNeg[0];
       findings.push({
         nivel: top.ating < 85 ? 3 : 2,
-        titulo: top.nome.split(' ')[0] + ' — pior comprador',
-        descricao: 'Ating. ' + fmtPct(top.ating) + ' · ' + compNeg.length + ' comprador(es) negativos',
+        titulo: top.nome.split(' ')[0] + ' ' + (top.nome.split(' ')[1]||'') + ' — pior comprador',
+        descricao: 'Ating. ' + fmtPct(top.ating) + ' · ' + compNeg.length + ' comprador(es) negativos no período',
         impacto: top.desvio
       });
     }
   }
+
+  // ── 9. Contexto Brasília ───────────────────────────────────────────────────
+  var contexto = _contextoExterno(totais, cl, tm);
+  if (contexto) findings.push(contexto);
 
   findings.sort(function(a,b){
     if (b.nivel !== a.nivel) return b.nivel - a.nivel;
     return Math.abs(b.impacto||0) - Math.abs(a.impacto||0);
   });
   return findings;
+}
+
+function _contextoExterno(totais, cl, tm) {
+  // Gera contexto baseado no período e padrões dos dados
+  var hints = [];
+  if (rangeStart) {
+    var d   = rangeStart.getDate();
+    var mes = rangeStart.getMonth() + 1;
+    // Início de mês: poder de compra ainda baixo
+    if (d <= 7) hints.push('Período de início de mês — poder de compra ainda baixo (salário pendente para grande parte dos servidores públicos de Brasília)');
+    // Semana Santa (março-abril)
+    if (mes === 4 && d <= 10) hints.push('Período próximo à Semana Santa — queda histórica no fluxo de varejo alimentar em Brasília (viagens e comportamento sazonal)');
+    // Final de mês
+    if (d >= 25) hints.push('Final de mês — consumidores com orçamento mais restrito; pico de compras de itens essenciais');
+  }
+  if (cl < -5 && tm > 0) hints.push('Queda de tráfego sem queda de ticket sugere perda de clientes para concorrência, não redução de poder de compra');
+  if (cl > 0 && tm < -5)  hints.push('Clientes mantidos mas ticket em queda — possível pressão competitiva em preços ou mix de produtos menos valorizado');
+
+  if (!hints.length) return null;
+  return {
+    nivel: 1,
+    titulo: 'Contexto — Possíveis fatores externos',
+    descricao: hints[0],
+    impacto: null, metrica: '📍 Brasília'
+  };
 }
 
 function renderDiagnostico(totais, rows, desviosResp) {

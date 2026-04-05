@@ -977,10 +977,18 @@ def api_desvios():
     set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_m}{emp_extra}>}}"
     set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{extra_m}{emp_extra}>}}"
 
+    set_prev = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{_mes_ano(ano-1, mes)}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+
     try:
-        rows_sec_v, rows_sec_m, rows_comp_v, rows_comp_m = _run_async_all(
+        rows_dep_v, rows_dep_m, rows_sec_v, rows_sec_m, rows_comp_v, rows_comp_m = _run_async_all(
+            _hypercube(APP_FAROL, ["Nível 1"],
+                       [f"Sum({set_v} #Medida1)", f"Count({set_v} Distinct ChaveNF)",
+                        f"Sum({set_prev} #Medida1)", f"Count({set_prev} Distinct ChaveNF)"], rows=200),
+            _hypercube(APP_FAROL, ["Nível 1"],
+                       [f"Sum({set_m} #Medida1)", f"Sum({set_m_mes} #Medida1)"], rows=200),
             _hypercube(APP_FAROL, ["Nível 2"],
-                       [f"Sum({set_v} #Medida1)", f"Count({set_v} Distinct ChaveNF)"], rows=500),
+                       [f"Sum({set_v} #Medida1)", f"Count({set_v} Distinct ChaveNF)",
+                        f"Sum({set_prev} #Medida1)", f"Count({set_prev} Distinct ChaveNF)"], rows=500),
             _hypercube(APP_FAROL, ["Nível 2"],
                        [f"Sum({set_m} #Medida1)", f"Sum({set_m_mes} #Medida1)"], rows=500),
             _hypercube(APP_FAROL, ["Comprador"],
@@ -991,7 +999,7 @@ def api_desvios():
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    def _build_ranking(rows_v, rows_m, dim_key, top=20):
+    def _build_ranking(rows_v, rows_m, dim_key, top=20, has_prev=False):
         m_map = {}
         for r in rows_m:
             k = r.get(dim_key, "").strip()
@@ -1005,28 +1013,36 @@ def api_desvios():
             k = r.get(dim_key, "").strip()
             if not k or k in ("-", ""):
                 continue
-            venda = _float(r.get("_m0", "0"))
-            nc    = int(_float(r.get("_m1", "0")))
-            m     = m_map.get(k, {})
-            meta  = m.get("meta", 0)
+            venda  = _float(r.get("_m0", "0"))
+            nc     = int(_float(r.get("_m1", "0")))
+            v_prev = _float(r.get("_m2", "0")) if has_prev else 0
+            nc_prev = int(_float(r.get("_m3", "0"))) if has_prev else 0
+            m      = m_map.get(k, {})
+            meta   = m.get("meta", 0)
             meta_mes = m.get("meta_mes", 0)
             desvio = round(venda - meta, 2)
             ating  = round(venda / meta * 100, 2) if meta > 0 else 0
             tm     = round(venda / nc, 2) if nc > 0 else 0
-            items.append({
+            prog_v = round((venda / v_prev - 1) * 100, 2) if v_prev > 0 else None
+            prog_cl = round((nc / nc_prev - 1) * 100, 2) if nc_prev > 0 else None
+            item = {
                 "nome": k, "venda": round(venda, 2),
                 "meta": round(meta, 2), "meta_mes": round(meta_mes, 2),
                 "desvio": desvio, "ating": ating,
                 "nro_clientes": nc, "ticket_medio": tm,
-            })
-        # Ordena por desvio crescente (maiores negativos primeiro)
+            }
+            if has_prev:
+                item["prog_venda_ml"] = prog_v
+                item["prog_cl_ml"] = prog_cl
+            items.append(item)
         items.sort(key=lambda x: x["desvio"])
         return items[:top]
 
-    secoes_rank    = _build_ranking(rows_sec_v,  rows_sec_m,  "Nível 2",   top=20)
-    compradores_rank = _build_ranking(rows_comp_v, rows_comp_m, "Comprador", top=20)
+    deps_rank   = _build_ranking(rows_dep_v, rows_dep_m, "Nível 1",   top=20, has_prev=True)
+    secoes_rank = _build_ranking(rows_sec_v, rows_sec_m, "Nível 2",   top=20, has_prev=True)
+    comps_rank  = _build_ranking(rows_comp_v, rows_comp_m, "Comprador", top=20)
 
-    return jsonify({"secoes": secoes_rank, "compradores": compradores_rank})
+    return jsonify({"departamentos": deps_rank, "secoes": secoes_rank, "compradores": comps_rank})
 
 
 @app.route("/api/vendas/drill", methods=["POST"])
