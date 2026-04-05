@@ -295,6 +295,9 @@
     .btn-drill.open { transform: rotate(90deg); }
     .btn-drill:hover { color: #1a5f7a; }
 
+    tr.totais-row td { background: #e8f0fe; border-top: 2px solid #4a90d9; border-bottom: 2px solid #4a90d9; }
+    tr.totais-row td:first-child { padding-left: 8px; }
+
     tr.dept-row td { background: #f4f8fc; border-bottom: 1px solid #eaf0f8; }
     tr.dept-row td:first-child { padding-left: 32px; }
     tr.dept-row:hover td { background: #eaf0f8; }
@@ -1020,7 +1023,19 @@ function carregarDados() {
       tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#aaa;">Nenhuma loja encontrada.</td></tr>';
       return;
     }
-    tbody.innerHTML = rows.map(function(r) {
+    var totalRow = '<tr class="totais-row">' +
+      '<td><strong>Totais</strong></td>' +
+      '<td class="num"><strong>' + fmtMoeda(t.meta_venda)   + '</strong></td>' +
+      '<td class="num"><strong>' + fmtMoeda(t.venda)        + '</strong></td>' +
+      '<td class="num ' + (t.desvio >= 0 ? 'ok' : 'bad') + '"><strong>' + fmtMoeda(t.desvio) + '</strong></td>' +
+      '<td class="num"><strong>' + Number(t.nro_clientes).toLocaleString('pt-BR') + '</strong></td>' +
+      '<td class="num ' + (t.prog_cl_ml >= 0 ? 'ok' : 'bad') + '"><strong>' + fmtPct(t.prog_cl_ml) + '</strong></td>' +
+      '<td class="num"><strong>' + fmtTicket(t.ticket_medio) + '</strong></td>' +
+      '<td class="num ' + (t.prog_tm_ml >= 0 ? 'ok' : 'bad') + '"><strong>' + fmtPct(t.prog_tm_ml) + '</strong></td>' +
+      '<td class="num ' + pctClass(t.prog_venda_ml) + '"><strong>' + fmtPct(t.prog_venda_ml) + '</strong></td>' +
+      '<td class="num ' + pctClass(t.ating) + '"><strong>' + fmtPct(t.ating) + '</strong></td>' +
+      '</tr>';
+    tbody.innerHTML = totalRow + rows.map(function(r) {
       var empId = r.empresa.replace(/[^a-zA-Z0-9]/g, '_');
       return '<tr class="loja-row" data-emp="' + r.empresa + '">' +
         '<td>' +
