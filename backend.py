@@ -388,6 +388,7 @@ def api_drill():
     # ── Qlik set expressions ─────────────────────────────────────────────────
     from calendar import monthrange
     ma            = _mes_ano(ano, mes)
+    ma_prev       = _mes_ano(ano - 1, mes)
     days          = _days(dia_ini, dia_fim)
     dias_passados = dia_fim - dia_ini + 1
     dias_no_mes   = monthrange(ano, mes)[1]
@@ -398,9 +399,11 @@ def api_drill():
     set_m    = (f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},"
                 f"Dia={{{days}}}{emp_filter}>}}")
     set_mmes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_filter}>}}"
+    set_prev = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_prev}'}},"
+                f"Dia={{{days}}}{extra}{emp_filter}>}}")
 
     try:
-        rows_v, rows_m = _run_async_all(
+        rows_v, rows_m, rows_prev = _run_async_all(
             _hypercube(
                 APP_FAROL,
                 ["Nível 1", "Nível 2"],
@@ -417,19 +420,41 @@ def api_drill():
                 [f"Sum({set_m} #Medida1)", f"Sum({set_mmes} #Medida1)"],
                 rows=200,
             ),
+            _hypercube(
+                APP_FAROL,
+                ["Nível 1", "Nível 2"],
+                [
+                    f"Count({set_prev} Distinct ChaveNF)",
+                    f"Sum({set_prev} #Medida1)",
+                ],
+                rows=500,
+            ),
         )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    # ── Mapas meta por (dept, seção) ──────────────────────────────────────────
-    meta_p   = {}   # meta acumulada período
-    meta_mes = {}   # meta mensal
+    # ── Mapas meta e ano anterior por (dept, seção) ───────────────────────────
+    meta_p   = {}
+    meta_mes = {}
     for r in rows_m:
         d = (r.get("Nível 1") or "").strip()
         s = (r.get("Nível 2") or "").strip()
         if d and s:
             meta_p[(d, s)]   = _float(r.get("_m0", "0"))
             meta_mes[(d, s)] = _float(r.get("_m1", "0"))
+
+    prev_map = {}
+    for r in rows_prev:
+        d = (r.get("Nível 1") or "").strip()
+        s = (r.get("Nível 2") or "").strip()
+        if d and s:
+            nc_p = int(_float(r.get("_m0", "0")))
+            v_p  = _float(r.get("_m1", "0"))
+            prev_map[(d, s)] = {
+                "nro_clientes": nc_p,
+                "venda":        v_p,
+                "ticket_medio": round(v_p / nc_p, 2) if nc_p > 0 else 0,
+            }
 
     def _prog(venda, meta_m):
         if meta_m > 0 and dias_passados > 0:
@@ -444,10 +469,14 @@ def api_drill():
         secao = (r.get("Nível 2") or "").strip()
         if not dept:
             continue
-        v  = round(_float(r.get("_m0", "0")), 2)
-        nc = int(_float(r.get("_m2", "0")))
-        mp = round(meta_p.get((dept, secao), 0), 2)
-        mm = meta_mes.get((dept, secao), 0)
+        v   = round(_float(r.get("_m0", "0")), 2)
+        nc  = int(_float(r.get("_m2", "0")))
+        tm  = round(v / nc, 2) if nc > 0 else 0
+        mp  = round(meta_p.get((dept, secao), 0), 2)
+        mm  = meta_mes.get((dept, secao), 0)
+        p   = prev_map.get((dept, secao), {})
+        nc_p = p.get("nro_clientes", 0)
+        tm_p = p.get("ticket_medio", 0)
         deps[dept].append({
             "secao":         secao,
             "meta_venda":    mp,
@@ -456,7 +485,9 @@ def api_drill():
             "ating":         round(v / mp * 100, 2) if mp > 0 else 0,
             "margem_pdv":    round(_float(r.get("_m1", "0")), 2),
             "nro_clientes":  nc,
-            "ticket_medio":  round(v / nc, 2) if nc > 0 else 0,
+            "ticket_medio":  tm,
+            "prog_cl_ml":    round((nc / nc_p - 1) * 100, 2) if nc_p > 0 else None,
+            "prog_tm_ml":    round((tm / tm_p - 1) * 100, 2) if tm_p > 0 else None,
             "prog_venda_ml": _prog(v, mm),
         })
 
@@ -467,6 +498,10 @@ def api_drill():
         meta   = round(sum(s["meta_venda"] for s in slist), 2)
         mm_d   = sum(meta_mes.get((dept, s["secao"]), 0) for s in slist)
         nc     = sum(s["nro_clientes"] for s in slist)
+        tm     = round(venda / nc, 2) if nc > 0 else 0
+        nc_p_d = sum(prev_map.get((dept, s["secao"]), {}).get("nro_clientes", 0) for s in slist)
+        v_p_d  = sum(prev_map.get((dept, s["secao"]), {}).get("venda", 0) for s in slist)
+        tm_p_d = round(v_p_d / nc_p_d, 2) if nc_p_d > 0 else 0
         result.append({
             "departamento":  dept,
             "meta_venda":    meta,
@@ -475,7 +510,9 @@ def api_drill():
             "ating":         round(venda / meta * 100, 2) if meta > 0 else 0,
             "margem_pdv":    round(sum(s["margem_pdv"] for s in slist), 2),
             "nro_clientes":  nc,
-            "ticket_medio":  round(venda / nc, 2) if nc > 0 else 0,
+            "ticket_medio":  tm,
+            "prog_cl_ml":    round((nc / nc_p_d - 1) * 100, 2) if nc_p_d > 0 else None,
+            "prog_tm_ml":    round((tm / tm_p_d - 1) * 100, 2) if tm_p_d > 0 else None,
             "prog_venda_ml": _prog(venda, mm_d),
             "secoes":        slist,
         })

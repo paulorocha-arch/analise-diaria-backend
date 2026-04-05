@@ -1162,9 +1162,9 @@ function renderDrill(empId, lojaRow, deptData) {
       '<td class="num">' + fmtMoeda(dVenda) + '</td>' +
       '<td class="num ' + (dDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(dDesvio) + '</td>' +
       '<td class="num">' + Number(dept.nro_clientes).toLocaleString('pt-BR') + '</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num ' + (dept.prog_cl_ml != null ? (dept.prog_cl_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (dept.prog_cl_ml != null ? fmtPct(dept.prog_cl_ml) : '—') + '</td>' +
       '<td class="num">' + fmtTicket(dTM) + '</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num ' + (dept.prog_tm_ml != null ? (dept.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (dept.prog_tm_ml != null ? fmtPct(dept.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(dProg) + '">' + fmtPct(dProg) + '</td>' +
       '<td class="num ' + pctClass(dAting) + '">' + fmtPct(dAting) + '</td>';
 
@@ -1207,9 +1207,9 @@ function toggleSecoes(deptKey, btn) {
       '<td class="num">' + fmtMoeda(sVenda) + '</td>' +
       '<td class="num ' + (sDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(sDesvio) + '</td>' +
       '<td class="num">' + Number(s.nro_clientes).toLocaleString('pt-BR') + '</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num ' + (s.prog_cl_ml != null ? (s.prog_cl_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (s.prog_cl_ml != null ? fmtPct(s.prog_cl_ml) : '—') + '</td>' +
       '<td class="num">' + fmtTicket(sTM) + '</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num ' + (s.prog_tm_ml != null ? (s.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (s.prog_tm_ml != null ? fmtPct(s.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(sProg) + '">' + fmtPct(sProg) + '</td>' +
       '<td class="num ' + pctClass(sAting) + '">' + fmtPct(sAting) + '</td>';
     insertAfter.after(tr);
