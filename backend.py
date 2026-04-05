@@ -887,14 +887,25 @@ def api_atingimento_diario():
         rows_v, rows_m = _run_async_all(
             _hypercube(APP_FAROL, ["Dia"],
                        [f"Sum({set_v} #Medida1)"], rows=200),
-            _hypercube(APP_FAROL, ["Empresa"],
+            _hypercube(APP_FAROL, ["Dia"],
                        [f"Sum({set_m_mes} #Medida1)"], rows=200),
         )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    # Meta total do mês = soma de todas as empresas (linha plana)
-    meta_mes = sum(_float(r.get("_m0", "0")) for r in rows_m if r.get("Empresa", "").strip())
+    # Meta total do mês (soma de todos os dias)
+    meta_mes = sum(_float(r.get("_m0", "0")) for r in rows_m if r.get("Dia", "").strip())
+
+    # Mapa dia → meta diária
+    meta_por_dia = {}
+    for r in rows_m:
+        try:
+            d = int(_float(r.get("Dia", "0")))
+            v = _float(r.get("_m0", "0"))
+            if d > 0:
+                meta_por_dia[d] = v
+        except Exception:
+            pass
 
     # Mapa dia → venda
     venda_por_dia = {}
@@ -910,7 +921,6 @@ def api_atingimento_diario():
     # Eixo X = todos os dias do mês; barras só nos dias filtrados
     dias_sem = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
     dias_filtrados = set(range(dia_ini, dia_fim + 1))
-    meta_dia = round(meta_mes / dias_no_mes, 2) if dias_no_mes > 0 else 0.0
 
     resultado = []
     for d in range(1, dias_no_mes + 1):
@@ -919,14 +929,11 @@ def api_atingimento_diario():
             label = f"{d:02d}/{dias_sem[wd]}"
         except Exception:
             label = f"{d:02d}"
-        if d in dias_filtrados:
-            venda = round(venda_por_dia.get(d, 0.0), 2)
-            ating = round(venda / meta_dia * 100, 1) if meta_dia > 0 else None
-            resultado.append({"dia": d, "label": label, "venda": venda, "meta_dia": None, "ating": ating})
-        else:
-            resultado.append({"dia": d, "label": label, "venda": None, "meta_dia": meta_dia, "ating": None})
+        venda    = round(venda_por_dia.get(d, 0.0), 2) if d in dias_filtrados else None
+        meta_dia = round(meta_por_dia.get(d, 0.0), 2)
+        resultado.append({"dia": d, "label": label, "venda": venda, "meta_dia": meta_dia})
 
-    return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2), "meta_dia": meta_dia})
+    return jsonify({"dias": resultado, "meta_mes": round(meta_mes, 2)})
 
 
 @app.route("/api/vendas/drill", methods=["POST"])

@@ -1199,10 +1199,9 @@ function carregarGrafico() {
   .then(function(resp) {
     if (resp.error || !resp.dias || resp.dias.length === 0) return;
 
-    var meta_dia = resp.meta_dia || 0;
-    var labels   = resp.dias.map(function(d) { return d.label; });
-    var vendas   = resp.dias.map(function(d) { return d.venda; });        // null nos dias sem dados
-    var metas    = resp.dias.map(function()  { return meta_dia || null; }); // linha plana em meta/dia
+    var labels = resp.dias.map(function(d) { return d.label; });
+    var vendas = resp.dias.map(function(d) { return d.venda; });
+    var metas  = resp.dias.map(function(d) { return d.meta_dia > 0 ? d.meta_dia : null; });
 
     var ctx = document.getElementById('chart-ating').getContext('2d');
     if (_chartAting) { _chartAting.destroy(); _chartAting = null; }
@@ -1228,6 +1227,18 @@ function carregarGrafico() {
             borderRadius: 3,
             order: 2,
           },
+          {
+            type: 'line',
+            label: 'Meta R$',
+            data: metas,
+            borderColor: '#e74c3c',
+            borderWidth: 1.5,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            tension: 0,
+            spanGaps: false,
+            order: 1,
+          },
         ]
       },
       options: {
@@ -1241,7 +1252,7 @@ function carregarGrafico() {
               label: function(c) {
                 var v = c.parsed.y;
                 if (v == null) return null;
-                if (c.dataset.label === 'Meta Dia R$') return ' Meta/dia: R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
+                if (c.dataset.label === 'Meta R$') return ' Meta: R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
                 return ' Venda: R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
               }
             }
