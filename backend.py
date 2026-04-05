@@ -346,14 +346,6 @@ def _set_extra(compradores, departamentos, secoes):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@app.route("/")
-@app.route("/<path:filename>")
-def serve_static(filename="index.html"):
-    """Serve arquivos estáticos para desenvolvimento local."""
-    base = os.path.dirname(os.path.abspath(__file__))
-    return send_from_directory(base, filename)
-
-
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok", "tenant": TENANT,
@@ -693,6 +685,14 @@ def api_vendas_drill():
     payload = {"empresa": empresa, "data": result}
     _mem_set(mem_key, payload)
     return jsonify(payload)
+
+
+@app.route("/")
+@app.route("/<path:filename>")
+def serve_static(filename="index.html"):
+    """Serve arquivos estáticos para desenvolvimento local."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base, filename)
 
 
 if __name__ == "__main__":
