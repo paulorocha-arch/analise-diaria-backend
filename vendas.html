@@ -1326,9 +1326,12 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
       .then(function(r) { return r.json(); })
       .then(function(f) {
         if (f.error) { if (callback) callback(); return; }
-        if (f.departamentos && f.departamentos.length > 0) initDD('departamento', f.departamentos);
-        if (f.secoes        && f.secoes.length > 0)        initDD('secao',        f.secoes);
-        if (f.compradores   && f.compradores.length > 0)   initDD('comprador',    f.compradores);
+        var DEPS_EXCLUIR = ['A CLASSIFICAR', 'DESPESAS'];
+        var SECOES_EXCLUIR = ['ALMOXARIFADO','CONSUMO LOJA','EMBALAGENS E INSUMOS','FAMILIAS','IMOBILIZADO','INSUMO E MATERIA PRIMA'];
+        var COMP_EXCLUIR  = ['MONICA NAYARA DE MATOS'];
+        if (f.departamentos && f.departamentos.length > 0) initDD('departamento', f.departamentos.filter(function(d){ return DEPS_EXCLUIR.indexOf(d) === -1; }));
+        if (f.secoes        && f.secoes.length > 0)        initDD('secao',        f.secoes.filter(function(s){ return SECOES_EXCLUIR.indexOf(s) === -1; }));
+        if (f.compradores   && f.compradores.length > 0)   initDD('comprador',    f.compradores.filter(function(c){ return COMP_EXCLUIR.indexOf(c) === -1; }));
         if (f.empresas      && f.empresas.length > 0) {
           DD_DATA.empresa.all      = f.empresas;
           DD_DATA.empresa.selected = new Set(f.empresas);
