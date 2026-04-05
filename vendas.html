@@ -931,11 +931,18 @@ function carregarDados() {
   const mes     = rangeStart ? rangeStart.getMonth() + 1 : new Date().getMonth() + 1;
   const diaIni  = rangeStart ? rangeStart.getDate() : 1;
   const diaFim  = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
-  const bandeiras     = Array.from(DD_DATA.bandeira.selected);
-  const empresas      = Array.from(DD_DATA.empresa.selected);
-  const compradores_f = Array.from(DD_DATA.comprador.selected);
-  const departamentos = Array.from(DD_DATA.departamento.selected);
-  const secoes        = Array.from(DD_DATA.secao.selected);
+
+  // Lista vazia = todos selecionados (sem filtro). Lista preenchida = subconjunto aplicado.
+  const sel = function(name) {
+    var d = DD_DATA[name];
+    return (d.selected.size === d.all.length || d.all.length === 0)
+      ? [] : Array.from(d.selected);
+  };
+  const bandeiras     = sel('bandeira');
+  const empresas      = sel('empresa');
+  const compradores_f = sel('comprador');
+  const departamentos = sel('departamento');
+  const secoes        = sel('secao');
 
   fetch(BACKEND_URL + '/api/vendas', {
     method: 'POST',

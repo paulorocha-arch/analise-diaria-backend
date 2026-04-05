@@ -165,10 +165,11 @@ async def _engine_session(app_id, callback):
 
 
 async def _hypercube(app_id, dimensions, measures, rows=100):
+    """Hipercubo simples sem paginação. Medidas retornam como _m0, _m1, ..."""
     q_dims    = [{"qDef": {"qFieldDefs": [d]}} for d in dimensions]
     q_meas    = [{"qDef": {"qDef": m}} for m in measures]
     n_cols    = len(dimensions) + len(measures)
-    col_names = dimensions + measures
+    col_names = dimensions + [f"_m{i}" for i in range(len(measures))]
 
     async def _run(rpc, recv_until, doc_handle):
         obj_def = {
@@ -188,7 +189,7 @@ async def _hypercube(app_id, dimensions, measures, rows=100):
             raise RuntimeError("Timeout ao criar hipercubo")
         handle = msg.get("result", {}).get("qReturn", {}).get("qHandle")
         lid = await rpc("GetLayout", [], handle)
-        msg = await recv_until(lid, timeout=30)
+        msg = await recv_until(lid, timeout=45)
         if not msg:
             raise RuntimeError("Timeout ao obter dados")
         hc    = msg.get("result", {}).get("qLayout", {}).get("qHyperCube", {})
@@ -204,6 +205,92 @@ async def _hypercube(app_id, dimensions, measures, rows=100):
         return data
 
     return await _engine_session(app_id, _run)
+
+
+async def _buscar_vendas_qlik(ano, mes, dia_ini, dia_fim, extra_v, emp_extra):
+    """Busca vendas + meta direto no Qlik, com filtros embutidos no set expression.
+    Retorna (rows_v, rows_m) onde cada row é um dict com chaves nomeadas.
+    """
+    from calendar import monthrange
+    ma   = _mes_ano(ano, mes)
+    days = _days(dia_ini, dia_fim)
+    dias_no_mes = monthrange(ano, mes)[1]
+
+    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}}}"
+    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{emp_extra}}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_extra}}}"
+
+    meas_v = [
+        f"Sum({set_v} #Medida1)",
+        f"Sum({set_v} #Medida2)",
+        f"Count({set_v} Distinct ChaveNF)",
+    ]
+    meas_m = [
+        f"Sum({set_m} #Medida1)",
+        f"Sum({set_m} #Medida2)",
+        f"Sum({set_m_mes} #Medida1)",
+    ]
+
+    async def _run(rpc, recv_until, doc_handle):
+        def make_obj(dims, meas_exprs, n_rows=500):
+            q_d = [{"qDef": {"qFieldDefs": [d]}} for d in dims]
+            q_m = [{"qDef": {"qDef": m}} for m in meas_exprs]
+            nc  = len(dims) + len(meas_exprs)
+            return {
+                "qInfo": {"qType": "HyperCube"},
+                "qHyperCubeDef": {
+                    "qDimensions": q_d, "qMeasures": q_m,
+                    "qInitialDataFetch": [{"qTop": 0, "qLeft": 0,
+                                           "qHeight": n_rows, "qWidth": nc}],
+                    "qMode": "S",
+                    "qSuppressZero": False, "qSuppressMissing": False,
+                },
+            }
+
+        def parse(result_msg, dims, meas_keys):
+            col_names = dims + meas_keys
+            hc    = result_msg.get("result", {}).get("qLayout", {}).get("qHyperCube", {})
+            pages = hc.get("qDataPages", [])
+            rows  = []
+            for page in pages:
+                for row in page.get("qMatrix", []):
+                    r = {}
+                    for i, cell in enumerate(row):
+                        if i < len(col_names):
+                            r[col_names[i]] = cell.get("qText",
+                                                        str(cell.get("qNum", "")))
+                    rows.append(r)
+            return rows
+
+        # ── Vendas ──
+        cid_v = await rpc("CreateSessionObject", [make_obj(["Empresa"], meas_v)], doc_handle)
+        msg   = await recv_until(cid_v)
+        if not msg:
+            raise RuntimeError("Timeout criar hipercubo vendas")
+        hv = msg.get("result", {}).get("qReturn", {}).get("qHandle")
+
+        lid_v = await rpc("GetLayout", [], hv)
+        lmsg_v = await recv_until(lid_v, timeout=60)
+        if not lmsg_v:
+            raise RuntimeError("Timeout layout vendas")
+
+        # ── Meta ──
+        cid_m = await rpc("CreateSessionObject", [make_obj(["Empresa"], meas_m)], doc_handle)
+        msg   = await recv_until(cid_m)
+        if not msg:
+            raise RuntimeError("Timeout criar hipercubo meta")
+        hm = msg.get("result", {}).get("qReturn", {}).get("qHandle")
+
+        lid_m = await rpc("GetLayout", [], hm)
+        lmsg_m = await recv_until(lid_m, timeout=60)
+        if not lmsg_m:
+            raise RuntimeError("Timeout layout meta")
+
+        rv = parse(lmsg_v, ["Empresa"], ["venda", "margem_pdv", "nro_clientes"])
+        rm = parse(lmsg_m, ["Empresa"], ["meta_venda", "meta_margem", "meta_venda_mes"])
+        return rv, rm
+
+    return await _engine_session(APP_FAROL, _run)
 
 
 def _run_async(coro):
@@ -351,16 +438,20 @@ def _ler_farol(colecao: str, ano: int, mes: int, dia_ini: int, dia_fim: int) -> 
 
 @app.route("/api/vendas", methods=["POST"])
 def api_vendas():
+    """
+    Consulta vendas e metas diretamente no Qlik com os filtros embutidos
+    nos set expressions. Listas vazias = sem filtro (todos os valores).
+    """
     body          = request.json or {}
     ano           = int(body.get("ano",  datetime.now().year))
     mes           = int(body.get("mes",  datetime.now().month))
     dia_ini       = int(body.get("dia_ini", 1))
     dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
-    empresas      = set(body.get("empresas", []))
-    bandeiras     = set(body.get("bandeiras", []))
-    compradores_f = set(body.get("compradores", []))
-    departamentos = set(body.get("departamentos", []))
-    secoes        = set(body.get("secoes", []))
+    empresas_f    = body.get("empresas",      [])   # [] = todos
+    bandeiras_f   = body.get("bandeiras",     [])   # [] = todos
+    compradores_f = body.get("compradores",   [])   # [] = todos
+    departamentos = body.get("departamentos", [])   # [] = todos
+    secoes        = body.get("secoes",        [])   # [] = todos
 
     if dia_ini > dia_fim:
         dia_ini, dia_fim = dia_fim, dia_ini
@@ -369,10 +460,10 @@ def api_vendas():
     dias_passados = dia_fim - dia_ini + 1
     dias_no_mes   = monthrange(ano, mes)[1]
 
-    # ── Cache em memória ────────────────────────────────────────────────────
+    # ── Cache ───────────────────────────────────────────────────────────────
     params  = {
         "ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
-        "empresas": sorted(empresas), "bandeiras": sorted(bandeiras),
+        "empresas": sorted(empresas_f), "bandeiras": sorted(bandeiras_f),
         "compradores": sorted(compradores_f),
         "departamentos": sorted(departamentos),
         "secoes": sorted(secoes),
@@ -382,98 +473,92 @@ def api_vendas():
     if mem:
         return jsonify(mem)
 
-    # ── Leitura do Firestore (farol_granular + farol_meta) ──────────────────
+    # ── Build set extensions ─────────────────────────────────────────────────
+    # Filtros de produto/comprador (aplicam só a vendas)
+    extra_v = _set_extra(compradores_f, departamentos, secoes)
+
+    # Filtros de empresa/bandeira (aplicam a vendas e meta)
+    emp_parts = []
+    if empresas_f:
+        vals = ",".join("'" + v + "'" for v in empresas_f)
+        emp_parts.append(f"Empresa={{{vals}}}")
+    if bandeiras_f:
+        vals = ",".join("'" + v + "'" for v in bandeiras_f)
+        emp_parts.append(f"Bandeira={{{vals}}}")
+    emp_extra = ("," + ",".join(emp_parts)) if emp_parts else ""
+
+    # ── Consulta Qlik ────────────────────────────────────────────────────────
     try:
-        rows_v = _ler_farol("farol_granular", ano, mes, dia_ini, dia_fim)
-        rows_m = _ler_farol("farol_meta",     ano, mes, dia_ini, dia_fim)
-        # Meta do mês completo (para Prog. de Venda %)
-        rows_m_mes = _ler_farol("farol_meta", ano, mes, 1, dias_no_mes)
+        rows_v, rows_m = _run_async(
+            _buscar_vendas_qlik(ano, mes, dia_ini, dia_fim, extra_v, emp_extra)
+        )
     except Exception as e:
-        return jsonify({"error": f"Firestore: {e}"}), 500
+        return jsonify({"error": f"Qlik: {e}"}), 500
 
     if not rows_v:
-        return jsonify({"error": "Sem dados no banco para o período selecionado. Execute sync_farol.py para sincronizar."}), 404
+        return jsonify({"error": "Sem dados no Qlik para o período selecionado."}), 404
 
-    # ── Aplicar filtros sobre os dados granulares ───────────────────────────
-    if bandeiras:
-        rows_v = [r for r in rows_v if r.get("bandeira") in bandeiras]
-        rows_m = [r for r in rows_m if r.get("bandeira") in bandeiras]
-    if empresas:
-        rows_v = [r for r in rows_v if r.get("empresa") in empresas]
-        rows_m = [r for r in rows_m if r.get("empresa") in empresas]
-    if compradores_f:
-        rows_v = [r for r in rows_v if r.get("comprador") in compradores_f]
-    if departamentos:
-        rows_v = [r for r in rows_v if r.get("departamento") in departamentos]
-    if secoes:
-        rows_v = [r for r in rows_v if r.get("secao") in secoes]
-
-    # ── Agregar por empresa ─────────────────────────────────────────────────
-    from collections import defaultdict
-
-    agg_v = defaultdict(lambda: {"venda": 0.0, "margem_pdv": 0.0, "nro_clientes": 0, "bandeira": ""})
-    for r in rows_v:
-        emp = r["empresa"]
-        agg_v[emp]["venda"]        += r.get("venda", 0)
-        agg_v[emp]["margem_pdv"]   += r.get("margem_pdv", 0)
-        agg_v[emp]["nro_clientes"] += r.get("nro_clientes", 0)
-        agg_v[emp]["bandeira"]      = r.get("bandeira", "")
-
-    # Meta do período
-    agg_m = defaultdict(lambda: {"meta_venda": 0.0, "meta_margem": 0.0})
+    # ── Montar mapa de meta por empresa ─────────────────────────────────────
+    agg_m = {}
     for r in rows_m:
-        emp = r["empresa"]
-        agg_m[emp]["meta_venda"]  += r.get("meta_venda", 0)
-        agg_m[emp]["meta_margem"] += r.get("meta_margem", 0)
-
-    # Meta do mês completo (para Prog. de Venda %)
-    agg_m_mes = defaultdict(float)
-    for r in rows_m_mes:
-        if bandeiras and r.get("bandeira") not in bandeiras:
+        emp = r.get("Empresa", "").strip()
+        if not emp:
             continue
-        if empresas and r.get("empresa") not in empresas:
-            continue
-        agg_m_mes[r["empresa"]] += r.get("meta_venda", 0)
+        agg_m[emp] = {
+            "meta_venda":     _float(r.get("meta_venda",     "0")),
+            "meta_margem":    _float(r.get("meta_margem",    "0")),
+            "meta_venda_mes": _float(r.get("meta_venda_mes", "0")),
+        }
 
-    # ── Montar linhas de saída ──────────────────────────────────────────────
+    # ── Montar linhas de saída ───────────────────────────────────────────────
+    def _bandeira(empresa):
+        return "BIG BOX" if empresa.upper().startswith("BIG") else "ULT"
+
     rows_out = []
-    for emp, v in sorted(agg_v.items()):
-        va    = round(v["venda"],      2)
-        mrg   = round(v["margem_pdv"], 2)
-        nc    = v["nro_clientes"]
-        bnd   = v["bandeira"]
-        ma_v  = round(agg_m[emp]["meta_venda"],  2)
-        m_mrg = round(agg_m[emp]["meta_margem"], 2)
-        m_mes = agg_m_mes.get(emp, 0)
+    for r in rows_v:
+        emp = r.get("Empresa", "").strip()
+        if not emp:
+            continue
+        va    = _float(r.get("venda",        "0"))
+        mrg   = _float(r.get("margem_pdv",   "0"))
+        nc    = int(_float(r.get("nro_clientes", "0")))
+        bnd   = _bandeira(emp)
+
+        m     = agg_m.get(emp, {})
+        ma_v  = m.get("meta_venda",     0)
+        m_mrg = m.get("meta_margem",    0)
+        m_mes = m.get("meta_venda_mes", 0)
         tm    = round(va / nc, 2) if nc > 0 else 0
 
-        ating     = round(va / ma_v * 100,   2) if ma_v  > 0 else 0
+        ating     = round(va / ma_v  * 100, 2) if ma_v  > 0 else 0
         ating_mrg = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
         prog_venda = round(va / dias_passados * dias_no_mes / m_mes * 100, 2) \
                      if m_mes > 0 and dias_passados > 0 else 0
 
         rows_out.append({
-            "empresa":      emp,
-            "bandeira":     bnd,
-            "meta_venda":   ma_v,
-            "venda":        va,
-            "desvio":       round(va - ma_v, 2),
-            "nro_clientes": nc,
-            "prog_cl_ml":   0,
-            "ticket_medio": tm,
-            "prog_tm_ml":   0,
+            "empresa":       emp,
+            "bandeira":      bnd,
+            "meta_venda":    round(ma_v,  2),
+            "venda":         round(va,    2),
+            "desvio":        round(va - ma_v, 2),
+            "nro_clientes":  nc,
+            "prog_cl_ml":    0,
+            "ticket_medio":  tm,
+            "prog_tm_ml":    0,
             "prog_venda_ml": prog_venda,
-            "ating":        ating,
-            "cresc_cl":     0,
-            "cresc_tm":     0,
-            "margem_pdv":   mrg,
-            "meta_margem":  m_mrg,
-            "ating_margem": ating_mrg,
-            "quebra":       0,
-            "meta_quebra":  0,
+            "ating":         ating,
+            "cresc_cl":      0,
+            "cresc_tm":      0,
+            "margem_pdv":    round(mrg,  2),
+            "meta_margem":   round(m_mrg, 2),
+            "ating_margem":  ating_mrg,
+            "quebra":        0,
+            "meta_quebra":   0,
         })
 
-    # ── Totais ──────────────────────────────────────────────────────────────
+    rows_out.sort(key=lambda r: r["empresa"])
+
+    # ── Totais ───────────────────────────────────────────────────────────────
     def _s(k):  return round(sum(r[k] for r in rows_out), 2)
     def _si(k): return sum(r[k] for r in rows_out)
 
@@ -483,7 +568,7 @@ def api_vendas():
     tot_mrg  = _s("margem_pdv")
     tot_mmrg = _s("meta_margem")
     tot_tm   = round(tot_va / tot_nc, 2) if tot_nc > 0 else 0
-    tot_mmes = sum(agg_m_mes.values())
+    tot_mmes = sum(m.get("meta_venda_mes", 0) for m in agg_m.values())
 
     totais = {
         "venda":         tot_va,
@@ -495,7 +580,7 @@ def api_vendas():
         "meta_margem":   tot_mmrg,
         "quebra":        0,
         "meta_quebra":   0,
-        "ating":         round(tot_va / tot_ma * 100, 2) if tot_ma > 0 else 0,
+        "ating":         round(tot_va / tot_ma  * 100, 2) if tot_ma  > 0 else 0,
         "ating_margem":  round(tot_mrg / tot_mmrg * 100, 2) if tot_mmrg > 0 else 0,
         "prog_venda_ml": round(tot_va / dias_passados * dias_no_mes / tot_mmes * 100, 2)
                          if tot_mmes > 0 and dias_passados > 0 else 0,
@@ -503,7 +588,7 @@ def api_vendas():
     }
 
     payload = {
-        "fonte": "firestore",
+        "fonte": "qlik",
         "filtros": {"ano": ano, "mes": mes, "dia_ini": dia_ini, "dia_fim": dia_fim,
                     "dias_passados": dias_passados, "dias_no_mes": dias_no_mes},
         "totais": totais,
