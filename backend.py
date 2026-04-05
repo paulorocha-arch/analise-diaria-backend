@@ -603,11 +603,9 @@ def api_vendas():
     if mem:
         return jsonify(mem)
 
-    # ── Build set extensions ─────────────────────────────────────────────────
-    # Filtros de produto/comprador (aplicam só a vendas)
+    # ── Build set expressions ────────────────────────────────────────────────
     extra_v = _set_extra(compradores_f, departamentos, secoes)
 
-    # Filtros de empresa/bandeira (aplicam a vendas e meta)
     emp_parts = []
     if empresas_f:
         vals = ",".join("'" + v + "'" for v in empresas_f)
@@ -617,10 +615,27 @@ def api_vendas():
         emp_parts.append(f"Bandeira={{{vals}}}")
     emp_extra = ("," + ",".join(emp_parts)) if emp_parts else ""
 
-    # ── Consulta Qlik ────────────────────────────────────────────────────────
+    ma       = _mes_ano(ano, mes)
+    ma_prev  = _mes_ano(ano - 1, mes)
+    days     = _days(dia_ini, dia_fim)
+
+    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{emp_extra}>}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_extra}>}}"
+    set_prev  = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma_prev}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+
+    # ── Consulta Qlik (3 hipercubos paralelos) ───────────────────────────────
     try:
-        rows_v, rows_m = _run_async(
-            _buscar_vendas_qlik(ano, mes, dia_ini, dia_fim, extra_v, emp_extra)
+        rows_v, rows_m, rows_prev = _run_async_all(
+            _hypercube(APP_FAROL, ["Empresa"],
+                       [f"Sum({set_v} #Medida1)", f"Sum({set_v} #Medida2)",
+                        f"Count({set_v} Distinct ChaveNF)"], rows=500),
+            _hypercube(APP_FAROL, ["Empresa"],
+                       [f"Sum({set_m} #Medida1)", f"Sum({set_m} #Medida2)",
+                        f"Sum({set_m_mes} #Medida1)"], rows=200),
+            _hypercube(APP_FAROL, ["Empresa"],
+                       [f"Count({set_prev} Distinct ChaveNF)",
+                        f"Sum({set_prev} #Medida1)"], rows=500),
         )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
@@ -628,17 +643,27 @@ def api_vendas():
     if not rows_v:
         return jsonify({"error": "Sem dados no Qlik para o período selecionado."}), 404
 
-    # ── Montar mapa de meta por empresa ─────────────────────────────────────
+    # ── Mapas por empresa ────────────────────────────────────────────────────
     agg_m = {}
     for r in rows_m:
         emp = r.get("Empresa", "").strip()
-        if not emp:
-            continue
-        agg_m[emp] = {
-            "meta_venda":     _float(r.get("meta_venda",     "0")),
-            "meta_margem":    _float(r.get("meta_margem",    "0")),
-            "meta_venda_mes": _float(r.get("meta_venda_mes", "0")),
-        }
+        if emp:
+            agg_m[emp] = {
+                "meta_venda":     _float(r.get("_m0", "0")),
+                "meta_margem":    _float(r.get("_m1", "0")),
+                "meta_venda_mes": _float(r.get("_m2", "0")),
+            }
+
+    prev_map = {}
+    for r in rows_prev:
+        emp = r.get("Empresa", "").strip()
+        if emp:
+            nc_p = int(_float(r.get("_m0", "0")))
+            v_p  = _float(r.get("_m1", "0"))
+            prev_map[emp] = {
+                "nro_clientes": nc_p,
+                "ticket_medio": round(v_p / nc_p, 2) if nc_p > 0 else 0,
+            }
 
     # ── Montar linhas de saída ───────────────────────────────────────────────
     def _bandeira(empresa):
@@ -649,21 +674,29 @@ def api_vendas():
         emp = r.get("Empresa", "").strip()
         if not emp:
             continue
-        va    = _float(r.get("venda",        "0"))
-        mrg   = _float(r.get("margem_pdv",   "0"))
-        nc    = int(_float(r.get("nro_clientes", "0")))
+        va    = _float(r.get("_m0", "0"))
+        mrg   = _float(r.get("_m1", "0"))
+        nc    = int(_float(r.get("_m2", "0")))
         bnd   = _bandeira(emp)
+        tm    = round(va / nc, 2) if nc > 0 else 0
 
         m     = agg_m.get(emp, {})
         ma_v  = m.get("meta_venda",     0)
         m_mrg = m.get("meta_margem",    0)
         m_mes = m.get("meta_venda_mes", 0)
-        tm    = round(va / nc, 2) if nc > 0 else 0
 
-        ating     = round(va / ma_v  * 100, 2) if ma_v  > 0 else 0
-        ating_mrg = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
+        p     = prev_map.get(emp, {})
+        nc_p  = p.get("nro_clientes", 0)
+        tm_p  = p.get("ticket_medio", 0)
+
+        ating      = round(va / ma_v  * 100, 2) if ma_v  > 0 else 0
+        ating_mrg  = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
         prog_venda = round(va / dias_passados * dias_no_mes / m_mes * 100, 2) \
                      if m_mes > 0 and dias_passados > 0 else 0
+        prog_cl_ml = round(nc  / nc_p * 100, 2) if nc_p > 0 else 0
+        prog_tm_ml = round(tm  / tm_p * 100, 2) if tm_p > 0 else 0
+        cresc_cl   = round((nc  / nc_p - 1) * 100, 2) if nc_p > 0 else 0
+        cresc_tm   = round((tm  / tm_p - 1) * 100, 2) if tm_p > 0 else 0
 
         rows_out.append({
             "empresa":       emp,
@@ -672,13 +705,13 @@ def api_vendas():
             "venda":         round(va,    2),
             "desvio":        round(va - ma_v, 2),
             "nro_clientes":  nc,
-            "prog_cl_ml":    0,
+            "prog_cl_ml":    prog_cl_ml,
             "ticket_medio":  tm,
-            "prog_tm_ml":    0,
+            "prog_tm_ml":    prog_tm_ml,
             "prog_venda_ml": prog_venda,
             "ating":         ating,
-            "cresc_cl":      0,
-            "cresc_tm":      0,
+            "cresc_cl":      cresc_cl,
+            "cresc_tm":      cresc_tm,
             "margem_pdv":    round(mrg,  2),
             "meta_margem":   round(m_mrg, 2),
             "ating_margem":  ating_mrg,
@@ -699,6 +732,9 @@ def api_vendas():
     tot_mmrg = _s("meta_margem")
     tot_tm   = round(tot_va / tot_nc, 2) if tot_nc > 0 else 0
     tot_mmes = sum(m.get("meta_venda_mes", 0) for m in agg_m.values())
+    tot_nc_p = sum(p.get("nro_clientes", 0) for p in prev_map.values())
+    tot_tm_p = round(sum(p.get("nro_clientes",0)*p.get("ticket_medio",0)
+                         for p in prev_map.values()) / tot_nc_p, 2) if tot_nc_p > 0 else 0
 
     totais = {
         "venda":         tot_va,
@@ -714,7 +750,10 @@ def api_vendas():
         "ating_margem":  round(tot_mrg / tot_mmrg * 100, 2) if tot_mmrg > 0 else 0,
         "prog_venda_ml": round(tot_va / dias_passados * dias_no_mes / tot_mmes * 100, 2)
                          if tot_mmes > 0 and dias_passados > 0 else 0,
-        "cresc_cl": 0, "cresc_tm": 0,
+        "prog_cl_ml":    round(tot_nc  / tot_nc_p * 100, 2) if tot_nc_p > 0 else 0,
+        "prog_tm_ml":    round(tot_tm  / tot_tm_p * 100, 2) if tot_tm_p > 0 else 0,
+        "cresc_cl":      round((tot_nc / tot_nc_p - 1) * 100, 2) if tot_nc_p > 0 else 0,
+        "cresc_tm":      round((tot_tm / tot_tm_p - 1) * 100, 2) if tot_tm_p > 0 else 0,
     }
 
     payload = {
