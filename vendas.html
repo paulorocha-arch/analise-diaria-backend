@@ -1027,7 +1027,9 @@ function renderDD(name, search) {
   allItem.onclick = function(e) { e.stopPropagation(); toggleAll(name); };
   list.appendChild(allItem);
 
-  const allowed = (name === 'secao' || name === 'comprador') ? getAllowed(name) : null;
+  const allowed = (name === 'secao' || name === 'comprador') ? getAllowed(name)
+                : (name === 'empresa') ? getAllowedEmpresas()
+                : null;
 
   filtered.forEach(function(item) {
     const isDisabled = allowed !== null && !allowed.has(item);
@@ -1099,6 +1101,38 @@ document.addEventListener('click', function(e) {
   if (!e.target.closest('.filter-btn') && !e.target.closest('.filter-dropdown') && !e.target.closest('.cal-dropdown')) {
     closeAllDropdowns();
   }
+});
+
+/* Retorna Set de empresas permitidas pela bandeira selecionada, ou null se todas */
+function getAllowedEmpresas() {
+  const bnd = DD_DATA.bandeira;
+  const ativas = (bnd.selected.size === 0 || bnd.selected.size === bnd.all.length)
+    ? null : Array.from(bnd.selected);
+  if (!ativas) return null;
+  const allowed = new Set();
+  DD_DATA.empresa.all.forEach(function(e) {
+    var b = e.toUpperCase().startsWith('BIG') ? 'BIG BOX' : 'ULT';
+    if (ativas.indexOf(b) >= 0) allowed.add(e);
+  });
+  return allowed;
+}
+
+/* Ao mudar bandeira: desabilita empresas fora do escopo e re-renderiza */
+window.addEventListener('filtro:bandeira', function() {
+  var allowed = getAllowedEmpresas();
+  var d = DD_DATA.empresa;
+  if (allowed !== null) {
+    d.selected.forEach(function(item) {
+      if (!allowed.has(item)) d.selected.delete(item);
+    });
+    if (d.selected.size === 0) {
+      d.all.forEach(function(item) { if (allowed.has(item)) d.selected.add(item); });
+    }
+  } else {
+    d.all.forEach(function(item) { d.selected.add(item); });
+  }
+  renderDD('empresa');
+  updateDDLabel('empresa');
 });
 
 /* Ao mudar departamento: remove seções/compradores fora do escopo e re-renderiza */
