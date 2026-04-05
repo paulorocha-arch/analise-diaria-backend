@@ -581,12 +581,12 @@
             <span class="kpi-row-val" id="kpi-meta-acum">—</span>
           </div>
           <div class="kpi-row">
-            <span class="kpi-row-label">Ating. de Venda %</span>
-            <span class="kpi-row-val" id="kpi-ating-venda">—</span>
+            <span class="kpi-row-label">Desvio R$</span>
+            <span class="kpi-row-val" id="kpi-desvio-venda">—</span>
           </div>
           <div class="kpi-row">
-            <span class="kpi-row-label">Prog. de Venda %</span>
-            <span class="kpi-row-val" id="kpi-prog-venda">—</span>
+            <span class="kpi-row-label">Ating. de Venda %</span>
+            <span class="kpi-row-val" id="kpi-ating-venda">—</span>
           </div>
         </div>
       </div>
@@ -1028,9 +1028,9 @@ function carregarDados() {
     // Atualizar KPIs com totais
     const t = resp.totais;
     document.getElementById('kpi-venda').textContent       = fmtMoeda(t.venda);
-    document.getElementById('kpi-meta-acum').textContent   = fmtMoeda(t.meta_venda);
-    document.getElementById('kpi-ating-venda').textContent = fmtPct(t.ating);
-    document.getElementById('kpi-prog-venda').textContent  = fmtPct(t.prog_venda_ml);
+    document.getElementById('kpi-meta-acum').textContent    = fmtMoeda(t.meta_venda);
+    document.getElementById('kpi-desvio-venda').textContent = fmtMoeda(t.desvio);
+    document.getElementById('kpi-ating-venda').textContent  = fmtPct(t.ating);
     document.getElementById('kpi-clientes').textContent       = Number(t.nro_clientes).toLocaleString('pt-BR');
     document.getElementById('kpi-clientes-cresc').textContent = fmtPct(t.prog_cl_ml);
     document.getElementById('kpi-ticket-medio').textContent   = fmtTicket(t.ticket_medio);
