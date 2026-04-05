@@ -216,9 +216,9 @@ async def _buscar_vendas_qlik(ano, mes, dia_ini, dia_fim, extra_v, emp_extra):
     days = _days(dia_ini, dia_fim)
     dias_no_mes = monthrange(ano, mes)[1]
 
-    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}}}"
-    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{emp_extra}}}"
-    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_extra}}}"
+    set_v     = f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{extra_v}{emp_extra}>}}"
+    set_m     = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},Dia={{{days}}}{emp_extra}>}}"
+    set_m_mes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_extra}>}}"
 
     meas_v = [
         f"Sum({set_v} #Medida1)",
@@ -391,7 +391,7 @@ def api_drill():
     extra      = _set_extra(compradores_f, departamentos, secoes_f)
     emp_filter = f",Empresa={{'{empresa}'}}"
     set_v = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
-             f"Dia={{{days}}}{extra}{emp_filter}}}")
+             f"Dia={{{days}}}{extra}{emp_filter}>}}")
 
     try:
         rows = _run_async(_hypercube(
