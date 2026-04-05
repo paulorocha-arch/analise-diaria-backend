@@ -930,6 +930,10 @@ function closeAllDropdowns() {
   document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
 }
 
+document.getElementById('cal-dropdown').addEventListener('click', function(e) {
+  e.stopPropagation();
+});
+
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.filter-btn') && !e.target.closest('.filter-dropdown') && !e.target.closest('.cal-dropdown')) {
     closeAllDropdowns();
