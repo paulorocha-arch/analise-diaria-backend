@@ -358,7 +358,7 @@ def health():
 def api_drill():
     """
     Drill-down: Departamento > Seção para uma empresa específica.
-    Usa Firestore (farol_granular). Rota curta para evitar conflitos de proxy.
+    Consulta Qlik diretamente com filtros via set expression.
     """
     body          = request.json or {}
     empresa       = body.get("empresa", "")
@@ -366,9 +366,9 @@ def api_drill():
     mes           = int(body.get("mes",  datetime.now().month))
     dia_ini       = int(body.get("dia_ini", 1))
     dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
-    compradores_f = set(body.get("compradores",   []))
-    departamentos = set(body.get("departamentos", []))
-    secoes_f      = set(body.get("secoes",        []))
+    compradores_f = body.get("compradores",   [])
+    departamentos = body.get("departamentos", [])
+    secoes_f      = body.get("secoes",        [])
 
     if not empresa:
         return jsonify({"error": "empresa obrigatória"}), 400
@@ -385,52 +385,52 @@ def api_drill():
     if mem:
         return jsonify(mem)
 
+    # ── Qlik set expression ──────────────────────────────────────────────────
+    ma         = _mes_ano(ano, mes)
+    days       = _days(dia_ini, dia_fim)
+    extra      = _set_extra(compradores_f, departamentos, secoes_f)
+    emp_filter = f",Empresa={{'{empresa}'}}"
+    set_v = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
+             f"Dia={{{days}}}{extra}{emp_filter}}}")
+
     try:
-        rows = _ler_farol("farol_granular", ano, mes, dia_ini, dia_fim)
+        rows = _run_async(_hypercube(
+            APP_FAROL,
+            ["Nível 1", "Nível 2"],
+            [
+                f"Sum({set_v} #Medida1)",
+                f"Sum({set_v} #Medida2)",
+                f"Count({set_v} Distinct ChaveNF)",
+            ],
+            rows=500,
+        ))
     except Exception as e:
-        return jsonify({"error": f"Firestore: {e}"}), 500
+        return jsonify({"error": f"Qlik: {e}"}), 500
 
-    if not rows:
-        return jsonify({"empresa": empresa, "data": []})
-
-    rows = [r for r in rows if r.get("empresa") == empresa]
-    if compradores_f:
-        rows = [r for r in rows if r.get("comprador") in compradores_f]
-    if departamentos:
-        rows = [r for r in rows if r.get("departamento") in departamentos]
-    if secoes_f:
-        rows = [r for r in rows if r.get("secao") in secoes_f]
-
+    # ── Agrupar por Departamento > Seção ─────────────────────────────────────
     from collections import defaultdict
-    deps = defaultdict(lambda: defaultdict(
-        lambda: {"venda": 0.0, "margem_pdv": 0.0, "nro_clientes": 0}
-    ))
+    deps = defaultdict(list)
     for r in rows:
-        dept  = (r.get("departamento") or "").strip()
-        secao = (r.get("secao")        or "").strip()
+        dept  = (r.get("Nível 1") or "").strip()
+        secao = (r.get("Nível 2") or "").strip()
         if not dept:
             continue
-        deps[dept][secao]["venda"]        += r.get("venda",        0)
-        deps[dept][secao]["margem_pdv"]   += r.get("margem_pdv",   0)
-        deps[dept][secao]["nro_clientes"] += r.get("nro_clientes", 0)
+        deps[dept].append({
+            "secao":        secao,
+            "venda":        round(_float(r.get("_m0", "0")), 2),
+            "margem_pdv":   round(_float(r.get("_m1", "0")), 2),
+            "nro_clientes": int(_float(r.get("_m2", "0"))),
+        })
 
     result = []
     for dept in sorted(deps):
-        secoes_list = []
-        for secao in sorted(deps[dept]):
-            s = deps[dept][secao]
-            secoes_list.append({
-                "secao":        secao,
-                "venda":        round(s["venda"],      2),
-                "margem_pdv":   round(s["margem_pdv"], 2),
-                "nro_clientes": s["nro_clientes"],
-            })
+        slist = sorted(deps[dept], key=lambda x: x["secao"])
         result.append({
             "departamento": dept,
-            "venda":        round(sum(s["venda"]        for s in secoes_list), 2),
-            "margem_pdv":   round(sum(s["margem_pdv"]   for s in secoes_list), 2),
-            "nro_clientes": sum(s["nro_clientes"]        for s in secoes_list),
-            "secoes":       secoes_list,
+            "venda":        round(sum(s["venda"]        for s in slist), 2),
+            "margem_pdv":   round(sum(s["margem_pdv"]   for s in slist), 2),
+            "nro_clientes": sum(s["nro_clientes"]        for s in slist),
+            "secoes":       slist,
         })
 
     payload = {"empresa": empresa, "data": result}
@@ -440,35 +440,32 @@ def api_drill():
 
 @app.route("/api/filtros")
 def api_filtros():
-    """Retorna listas de filtros lidas diretamente do Firestore (farol_granular do último mês disponível)."""
+    """Retorna listas de filtros diretamente do Qlik (valores distintos por campo)."""
     mem = _mem_get("__filtros__")
     if mem:
         return jsonify(mem)
 
     try:
-        if not FIREBASE_OK:
-            raise RuntimeError("Firestore não configurado")
+        rows_emp, rows_dep, rows_sec, rows_com = _run_async_all(
+            _hypercube(APP_FAROL, ["Empresa"],   [], rows=200),
+            _hypercube(APP_FAROL, ["Nível 1"],   [], rows=100),
+            _hypercube(APP_FAROL, ["Nível 2"],   [], rows=500),
+            _hypercube(APP_FAROL, ["Comprador"], [], rows=500),
+        )
 
-        # Descobre o último período disponível no índice
-        idx_docs = list(_db.collection("farol_granular_index").stream())
-        if not idx_docs:
-            raise RuntimeError("Nenhum dado no banco")
+        empresas      = sorted(r["Empresa"]   for r in rows_emp
+                               if r.get("Empresa")   and r["Empresa"]   not in ("-", ""))
+        departamentos = sorted(r["Nível 1"]   for r in rows_dep
+                               if r.get("Nível 1")   and r["Nível 1"]   not in ("-", ""))
+        secoes        = sorted(r["Nível 2"]   for r in rows_sec
+                               if r.get("Nível 2")   and r["Nível 2"]   not in ("-", ""))
+        compradores   = sorted(r["Comprador"] for r in rows_com
+                               if r.get("Comprador") and r["Comprador"]
+                               not in ("-", "", "NÃO IDENTIFICADO"))
 
-        # Pega o doc mais recente (maior ID = maior data)
-        ultimo = sorted(d.id for d in idx_docs)[-1]
-        # ID formato: 2026_04_01 → extrai ano/mes/dia
-        partes = ultimo.split("_")
-        ano_u, mes_u, dia_u = int(partes[0]), int(partes[1]), int(partes[2])
-
-        # Lê apenas 1 dia (o mais recente) para extrair os valores únicos de filtro
-        rows = _ler_farol("farol_granular", ano_u, mes_u, dia_u, dia_u)
-
-        empresas      = sorted({r["empresa"]      for r in rows if r.get("empresa")})
-        bandeiras     = sorted({r["bandeira"]      for r in rows if r.get("bandeira")})
-        compradores   = sorted({r["comprador"]     for r in rows
-                                if r.get("comprador") and r["comprador"] != "NÃO IDENTIFICADO"})
-        departamentos = sorted({r["departamento"]  for r in rows if r.get("departamento")})
-        secoes        = sorted({r["secao"]         for r in rows if r.get("secao")})
+        def _bandeira(empresa):
+            return "BIG BOX" if empresa.upper().startswith("BIG") else "ULT"
+        bandeiras = sorted({_bandeira(e) for e in empresas})
 
         payload = {
             "empresas": empresas, "bandeiras": bandeiras,
