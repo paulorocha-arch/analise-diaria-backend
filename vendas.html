@@ -258,6 +258,7 @@
     .ating-badge.ating-bad  { color: #ff1744; border-color: #ff1744; background: rgba(255,23,68,0.08); }
 
     /* SUMÁRIO EXECUTIVO ANALÍTICO */
+    /* SUMÁRIO EXECUTIVO — NOVO VISUAL */
     .exec-card {
       background: #fff;
       border-radius: 12px;
@@ -266,44 +267,49 @@
       overflow: hidden;
     }
     .exec-card-header {
-      padding: 14px 20px 12px;
+      padding: 13px 20px 11px;
       border-bottom: 1px solid #f0f0f0;
       display: flex; align-items: center; gap: 10px;
     }
-    .exec-card-header .ec-title {
-      font-size: 13px; font-weight: 700; color: #1a1a2e;
+    .exec-card-header .ec-title { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+    .exec-card-header .ec-subtitle { font-size: 11px; color: #aaa; margin-left: auto; }
+
+    .exec-findings {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 0;
     }
-    .exec-card-header .ec-subtitle {
-      font-size: 11px; color: #999; margin-left: 4px;
-    }
-    .exec-findings { padding: 8px 0; }
     .exec-finding {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 10px 20px;
-      border-bottom: 1px solid #f7f7f7;
-      transition: background .1s;
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px;
+      border-right: 1px solid #f0f0f0;
+      border-bottom: 1px solid #f0f0f0;
     }
-    .exec-finding:last-child { border-bottom: none; }
     .exec-finding:hover { background: #fafbfc; }
-    .exec-finding .ef-tag {
-      flex-shrink: 0;
-      font-size: 10px; font-weight: 800; letter-spacing: .4px;
-      padding: 3px 9px; border-radius: 20px;
-      min-width: 72px; text-align: center; margin-top: 1px;
+    .ef-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
     }
-    .ef-tag.critico  { background: rgba(231,76,60,.12);  color: #c0392b; }
-    .ef-tag.alto     { background: rgba(230,126,34,.12); color: #d35400; }
-    .ef-tag.medio    { background: rgba(241,196,15,.15); color: #b7950b; }
-    .ef-tag.atencao  { background: rgba(52,152,219,.12); color: #1a6fa8; }
-    .exec-finding .ef-body { flex: 1; }
-    .exec-finding .ef-text {
-      font-size: 12.5px; color: #333; line-height: 1.45;
+    .ef-dot.critico { background: #e74c3c; box-shadow: 0 0 0 3px rgba(231,76,60,.18); }
+    .ef-dot.alto    { background: #e67e22; box-shadow: 0 0 0 3px rgba(230,126,34,.18); }
+    .ef-dot.medio   { background: #f1c40f; box-shadow: 0 0 0 3px rgba(241,196,15,.18); }
+    .ef-dot.atencao { background: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,.18); }
+    .ef-content { flex: 1; min-width: 0; }
+    .ef-title {
+      font-size: 12px; font-weight: 700; color: #1a1a2e;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .exec-finding .ef-impact {
-      font-size: 11px; color: #999; margin-top: 3px;
+    .ef-desc {
+      font-size: 11px; color: #888; margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .exec-finding .ef-impact strong { color: #e74c3c; }
-    .exec-empty { padding: 28px 20px; text-align: center; color: #bbb; font-size: 13px; }
+    .ef-value {
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+      text-align: right;
+    }
+    .ef-value.neg { color: #e74c3c; }
+    .ef-value.warn { color: #e67e22; }
+    .ef-value.ok  { color: #27ae60; }
+    .exec-empty { padding: 28px 20px; text-align: center; color: #bbb; font-size: 13px; grid-column: 1/-1; }
 
     /* SUMÁRIO EXECUTIVO */
     .sumario-grid {
@@ -1357,102 +1363,119 @@ function _fmtImpacto(v) {
 
 function gerarDiagnostico(totais, rows, desviosResp) {
   var findings = [];
-
-  // ── 1. Atingimento geral de venda ──────────────────────────────────────────
-  var at = totais.ating || 0;
-  if (at > 0) {
-    var nivel = at < 80 ? 4 : at < 90 ? 3 : at < 95 ? 3 : at < 100 ? 2 : 0;
-    if (nivel > 0) {
-      findings.push({ nivel: nivel, categoria: 'VENDA GERAL',
-        texto: 'Atingimento geral de <strong>' + fmtPct(at) + '</strong> — desvio acumulado de <strong>' + _fmtImpacto(totais.desvio) + '</strong> em relação à meta do período.',
-        impacto: totais.desvio });
-    }
-  }
-
-  // ── 2. Concentração do desvio ──────────────────────────────────────────────
   var negRows = (rows || []).filter(function(r){ return r.desvio < 0; })
                              .sort(function(a,b){ return a.desvio - b.desvio; });
+  var cl = totais.prog_cl_ml || 0;
+  var tm = totais.prog_tm_ml || 0;
+  var at = totais.ating || 0;
+
+  // 1. Atingimento geral
+  if (at > 0 && at < 100) {
+    findings.push({
+      nivel: at < 85 ? 4 : at < 95 ? 3 : 2,
+      titulo: 'Venda ' + fmtPct(at) + ' da meta',
+      descricao: 'Desvio acumulado no período',
+      impacto: totais.desvio
+    });
+  }
+
+  // 2. Lojas críticas
+  var lojasCrit = (rows || []).filter(function(r){ return r.ating > 0 && r.ating < 85; });
+  if (lojasCrit.length) {
+    findings.push({
+      nivel: 4,
+      titulo: lojasCrit.length + ' loja(s) abaixo de 85%',
+      descricao: lojasCrit.slice(0,3).map(function(r){ return r.empresa; }).join(' · '),
+      impacto: lojasCrit.reduce(function(s,r){ return s+r.desvio; }, 0)
+    });
+  }
+
+  // 3. Concentração do desvio
   if (negRows.length > 0 && totais.desvio < 0) {
-    var top3sum = negRows.slice(0,3).reduce(function(s,r){ return s + r.desvio; }, 0);
+    var top3sum = negRows.slice(0,3).reduce(function(s,r){ return s+r.desvio; }, 0);
     var pct = Math.abs(top3sum / totais.desvio * 100);
-    if (pct >= 50) {
-      var nomes = negRows.slice(0, Math.min(3, negRows.length)).map(function(r){ return r.empresa; }).join(', ');
-      findings.push({ nivel: 3, categoria: 'CONCENTRAÇÃO',
-        texto: '<strong>' + pct.toFixed(0) + '%</strong> do desvio total está concentrado em ' + Math.min(3, negRows.length) + ' loja(s): <strong>' + nomes + '</strong>.',
-        impacto: top3sum });
+    if (pct >= 55) {
+      findings.push({
+        nivel: 3,
+        titulo: pct.toFixed(0) + '% do desvio em ' + Math.min(3, negRows.length) + ' loja(s)',
+        descricao: negRows.slice(0,3).map(function(r){ return r.empresa; }).join(' · '),
+        impacto: top3sum
+      });
     }
   }
 
-  // ── 3. Lojas críticas (ating < 85%) ───────────────────────────────────────
-  var lojasCrit = (rows || []).filter(function(r){ return r.ating > 0 && r.ating < 85; });
-  if (lojasCrit.length > 0) {
-    var desvioLj = lojasCrit.reduce(function(s,r){ return s + r.desvio; }, 0);
-    findings.push({ nivel: 4, categoria: 'LOJAS CRÍTICAS',
-      texto: '<strong>' + lojasCrit.length + ' loja(s)</strong> com atingimento abaixo de 85%: ' + lojasCrit.map(function(r){ return r.empresa + ' (' + fmtPct(r.ating) + ')'; }).join(', ') + '.',
-      impacto: desvioLj });
-  }
-
-  // ── 4. Ticket Médio ────────────────────────────────────────────────────────
-  var tm = totais.prog_tm_ml || 0;
-  if (tm < -3) {
-    findings.push({ nivel: tm < -8 ? 3 : 2, categoria: 'TICKET MÉDIO',
-      texto: 'Ticket médio retraiu <strong>' + Math.abs(tm).toFixed(1) + '%</strong> vs mesmo período do ano anterior. Atual: <strong>' + fmtTicket(totais.ticket_medio) + '</strong>.',
-      impacto: null });
-  }
-
-  // ── 5. Tráfego de clientes ─────────────────────────────────────────────────
-  var cl = totais.prog_cl_ml || 0;
-  if (cl < -3) {
-    findings.push({ nivel: cl < -8 ? 3 : 2, categoria: 'TRÁFEGO',
-      texto: 'Fluxo de clientes retraiu <strong>' + Math.abs(cl).toFixed(1) + '%</strong> vs mesmo período do ano anterior (' + Number(totais.nro_clientes).toLocaleString('pt-BR') + ' clientes no período).',
-      impacto: null });
-  }
-
-  // ── 6. Combinação: queda de tráfego E ticket ──────────────────────────────
+  // 4. Queda simultânea tráfego + ticket
   if (cl < -3 && tm < -3) {
-    findings.push({ nivel: 4, categoria: 'DUPLO IMPACTO',
-      texto: 'Queda simultânea de tráfego (<strong>' + Math.abs(cl).toFixed(1) + '%</strong>) e ticket médio (<strong>' + Math.abs(tm).toFixed(1) + '%</strong>) indica perda de atratividade. Investigar mix de produtos e precificação.',
-      impacto: null });
+    findings.push({
+      nivel: 4,
+      titulo: 'Queda de tráfego e ticket simultâneos',
+      descricao: 'Clientes ' + cl.toFixed(1) + '% · Ticket ' + tm.toFixed(1) + '% vs ano anterior',
+      impacto: null, metrica: '⚠ Duplo impacto'
+    });
+  } else {
+    // 5. Tráfego
+    if (cl < -3) {
+      findings.push({
+        nivel: cl < -8 ? 3 : 2,
+        titulo: 'Tráfego de clientes em queda',
+        descricao: Number(totais.nro_clientes).toLocaleString('pt-BR') + ' clientes no período',
+        impacto: null, metrica: cl.toFixed(1) + '%'
+      });
+    }
+    // 6. Ticket Médio
+    if (tm < -3) {
+      findings.push({
+        nivel: tm < -8 ? 3 : 2,
+        titulo: 'Ticket médio abaixo do ano anterior',
+        descricao: 'Atual: ' + fmtTicket(totais.ticket_medio),
+        impacto: null, metrica: tm.toFixed(1) + '%'
+      });
+    }
   }
 
-  // ── 7. Margem ──────────────────────────────────────────────────────────────
+  // 7. Margem
   var atMrg = totais.ating_margem || 0;
   if (atMrg > 0 && atMrg < 95) {
     var devMrg = (totais.margem_pdv || 0) - (totais.meta_margem || 0);
-    findings.push({ nivel: atMrg < 85 ? 3 : 2, categoria: 'MARGEM',
-      texto: 'Margem PDV com atingimento de <strong>' + fmtPct(atMrg) + '</strong> da meta. Desvio de <strong>' + _fmtImpacto(devMrg) + '</strong>.',
-      impacto: devMrg });
+    findings.push({
+      nivel: atMrg < 85 ? 3 : 2,
+      titulo: 'Margem ' + fmtPct(atMrg) + ' da meta',
+      descricao: 'Margem PDV: ' + _fmtImpacto(totais.margem_pdv),
+      impacto: devMrg
+    });
   }
 
-  // ── 8. Seções mais impactantes ────────────────────────────────────────────
-  if (desviosResp && desviosResp.secoes && desviosResp.secoes.length > 0) {
+  // 8. Seções
+  if (desviosResp && desviosResp.secoes) {
     var secNeg = desviosResp.secoes.filter(function(s){ return s.desvio < 0; });
-    if (secNeg.length > 0) {
-      var totalDevSec = secNeg.reduce(function(s,r){ return s + r.desvio; }, 0);
-      var top3Sec = secNeg.slice(0,3).map(function(s){ return s.nome + ' (' + fmtPct(s.ating) + ')'; }).join(', ');
-      findings.push({ nivel: secNeg[0].ating < 85 ? 3 : 2, categoria: 'SEÇÕES',
-        texto: '<strong>' + secNeg.length + ' seção(ões)</strong> com desvio negativo. Maiores impactos: <strong>' + top3Sec + '</strong>.',
-        impacto: totalDevSec });
+    if (secNeg.length) {
+      findings.push({
+        nivel: secNeg[0].ating < 85 ? 3 : 2,
+        titulo: secNeg.length + ' seção(ões) com desvio negativo',
+        descricao: secNeg.slice(0,3).map(function(s){ return s.nome; }).join(' · '),
+        impacto: secNeg.reduce(function(s,r){ return s+r.desvio; }, 0)
+      });
     }
   }
 
-  // ── 9. Comprador com maior impacto ────────────────────────────────────────
-  if (desviosResp && desviosResp.compradores && desviosResp.compradores.length > 0) {
+  // 9. Comprador
+  if (desviosResp && desviosResp.compradores) {
     var compNeg = desviosResp.compradores.filter(function(c){ return c.desvio < 0; });
-    if (compNeg.length > 0) {
-      var topComp = compNeg[0];
-      findings.push({ nivel: topComp.ating < 85 ? 3 : 2, categoria: 'COMPRADOR',
-        texto: 'Comprador com maior desvio: <strong>' + topComp.nome + '</strong> — ating. <strong>' + fmtPct(topComp.ating) + '</strong>, desvio de <strong>' + _fmtImpacto(topComp.desvio) + '</strong>.',
-        impacto: topComp.desvio });
+    if (compNeg.length) {
+      var top = compNeg[0];
+      findings.push({
+        nivel: top.ating < 85 ? 3 : 2,
+        titulo: top.nome.split(' ')[0] + ' — pior comprador',
+        descricao: 'Ating. ' + fmtPct(top.ating) + ' · ' + compNeg.length + ' comprador(es) negativos',
+        impacto: top.desvio
+      });
     }
   }
 
-  // Ordena por nível desc, depois por impacto absoluto
-  findings.sort(function(a, b) {
+  findings.sort(function(a,b){
     if (b.nivel !== a.nivel) return b.nivel - a.nivel;
-    return Math.abs(b.impacto || 0) - Math.abs(a.impacto || 0);
+    return Math.abs(b.impacto||0) - Math.abs(a.impacto||0);
   });
-
   return findings;
 }
 
@@ -1461,19 +1484,21 @@ function renderDiagnostico(totais, rows, desviosResp) {
   var findings  = gerarDiagnostico(totais, rows, desviosResp);
 
   if (!findings.length) {
-    container.innerHTML = '<div class="exec-empty">✅ Nenhuma inconsistência relevante identificada no período.</div>';
+    container.innerHTML = '<div class="exec-empty">✅ Sem alertas no período selecionado.</div>';
     return;
   }
 
   container.innerHTML = findings.map(function(f) {
-    var n   = _nivel(f.nivel);
-    var imp = f.impacto ? '<strong>' + _fmtImpacto(f.impacto) + '</strong>' : '';
+    var n       = _nivel(f.nivel);
+    var valCls  = f.impacto ? (f.impacto < 0 ? 'neg' : 'ok') : 'warn';
+    var valTxt  = f.impacto ? _fmtImpacto(f.impacto) : (f.metrica || '');
     return '<div class="exec-finding">' +
-      '<span class="ef-tag ' + n.cls + '">' + n.label + '</span>' +
-      '<div class="ef-body">' +
-        '<div class="ef-text">' + f.categoria + ' — ' + f.texto + '</div>' +
-        (imp ? '<div class="ef-impact">Impacto estimado: ' + imp + '</div>' : '') +
+      '<span class="ef-dot ' + n.cls + '"></span>' +
+      '<div class="ef-content">' +
+        '<div class="ef-title">' + f.titulo + '</div>' +
+        '<div class="ef-desc">'  + f.descricao + '</div>' +
       '</div>' +
+      (valTxt ? '<div class="ef-value ' + valCls + '">' + valTxt + '</div>' : '') +
     '</div>';
   }).join('');
 }
