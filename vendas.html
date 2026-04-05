@@ -589,7 +589,7 @@
         <div class="kpi-value" id="kpi-clientes">—</div>
         <div class="kpi-rows">
           <div class="kpi-row">
-            <span class="kpi-row-label">% Cresc Nro Clientes</span>
+            <span class="kpi-row-label">Prg Clientes ML %</span>
             <span class="kpi-row-val" id="kpi-clientes-cresc">—</span>
           </div>
           <div class="kpi-row">
@@ -597,7 +597,7 @@
             <span class="kpi-row-val" id="kpi-ticket-medio">—</span>
           </div>
           <div class="kpi-row">
-            <span class="kpi-row-label">% Cresc Ticket Médio</span>
+            <span class="kpi-row-label">Prg Ticket Médio ML %</span>
             <span class="kpi-row-val" id="kpi-ticket-cresc">—</span>
           </div>
         </div>
@@ -1018,9 +1018,9 @@ function carregarDados() {
     document.getElementById('kpi-ating-venda').textContent = fmtPct(t.ating);
     document.getElementById('kpi-prog-venda').textContent  = fmtPct(t.prog_venda_ml);
     document.getElementById('kpi-clientes').textContent       = Number(t.nro_clientes).toLocaleString('pt-BR');
-    document.getElementById('kpi-clientes-cresc').textContent = fmtPct(t.cresc_cl);
+    document.getElementById('kpi-clientes-cresc').textContent = fmtPct(t.prog_cl_ml);
     document.getElementById('kpi-ticket-medio').textContent   = fmtTicket(t.ticket_medio);
-    document.getElementById('kpi-ticket-cresc').textContent   = fmtPct(t.cresc_tm);
+    document.getElementById('kpi-ticket-cresc').textContent   = fmtPct(t.prog_tm_ml);
     document.getElementById('kpi-margem').textContent         = fmtMoeda(t.margem_pdv);
     document.getElementById('kpi-margem-meta').textContent    = fmtMoeda(t.meta_margem);
     document.getElementById('kpi-margem-ating').textContent   = fmtPct(t.ating_margem);
