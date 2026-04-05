@@ -236,8 +236,9 @@
     td.ok   { color: #27ae60; font-weight: 600; }
     td.bad  { color: #e74c3c; font-weight: 600; }
     td.warn { color: #e67e22; font-weight: 600; }
-    td.ating-ok  { color: #00c8ff; font-weight: 700; }
-    td.ating-bad { color: #ff1744; font-weight: 700; }
+    td.ating-ok   { color: #27ae60; font-weight: 700; }
+    td.ating-warn { color: #e67e22; font-weight: 700; }
+    td.ating-bad  { color: #e74c3c; font-weight: 700; }
 
     /* SECTION TITLE */
     .section-header {
@@ -960,7 +961,9 @@ function pctClass(v) {
   return v >= 0 ? 'ok' : 'bad';
 }
 function atingClass(v) {
-  return v >= 100 ? 'ating-ok' : 'ating-bad';
+  if (v >= 100) return 'ating-ok';
+  if (v >= 95)  return 'ating-warn';
+  return 'ating-bad';
 }
 function pctColor(v) {
   if (v >= 100) return '#27ae60';
