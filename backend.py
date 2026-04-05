@@ -386,14 +386,18 @@ def api_drill():
         return jsonify(mem)
 
     # ── Qlik set expressions ─────────────────────────────────────────────────
-    ma         = _mes_ano(ano, mes)
-    days       = _days(dia_ini, dia_fim)
-    extra      = _set_extra(compradores_f, departamentos, secoes_f)
-    emp_filter = f",Empresa={{'{empresa}'}}"
-    set_v = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
-             f"Dia={{{days}}}{extra}{emp_filter}>}}")
-    set_m = (f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},"
-             f"Dia={{{days}}}{emp_filter}>}}")
+    from calendar import monthrange
+    ma            = _mes_ano(ano, mes)
+    days          = _days(dia_ini, dia_fim)
+    dias_passados = dia_fim - dia_ini + 1
+    dias_no_mes   = monthrange(ano, mes)[1]
+    extra         = _set_extra(compradores_f, departamentos, secoes_f)
+    emp_filter    = f",Empresa={{'{empresa}'}}"
+    set_v    = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
+                f"Dia={{{days}}}{extra}{emp_filter}>}}")
+    set_m    = (f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}},"
+                f"Dia={{{days}}}{emp_filter}>}}")
+    set_mmes = f"{{<FlagFatosMetas={{1}},[Mês/Ano]={{'{ma}'}}{emp_filter}>}}"
 
     try:
         rows_v, rows_m = _run_async_all(
@@ -409,17 +413,28 @@ def api_drill():
             ),
             _hypercube(
                 APP_FAROL,
-                ["Nível 1"],
-                [f"Sum({set_m} #Medida1)"],
-                rows=100,
+                ["Nível 1", "Nível 2"],
+                [f"Sum({set_m} #Medida1)", f"Sum({set_mmes} #Medida1)"],
+                rows=200,
             ),
         )
     except Exception as e:
         return jsonify({"error": f"Qlik: {e}"}), 500
 
-    # ── Mapa meta por departamento ────────────────────────────────────────────
-    meta_dept = {(r.get("Nível 1") or "").strip(): _float(r.get("_m0", "0"))
-                 for r in rows_m}
+    # ── Mapas meta por (dept, seção) ──────────────────────────────────────────
+    meta_p   = {}   # meta acumulada período
+    meta_mes = {}   # meta mensal
+    for r in rows_m:
+        d = (r.get("Nível 1") or "").strip()
+        s = (r.get("Nível 2") or "").strip()
+        if d and s:
+            meta_p[(d, s)]   = _float(r.get("_m0", "0"))
+            meta_mes[(d, s)] = _float(r.get("_m1", "0"))
+
+    def _prog(venda, meta_m):
+        if meta_m > 0 and dias_passados > 0:
+            return round(venda / dias_passados * dias_no_mes / meta_m * 100, 2)
+        return 0
 
     # ── Agrupar vendas por Departamento > Seção ───────────────────────────────
     from collections import defaultdict
@@ -429,27 +444,40 @@ def api_drill():
         secao = (r.get("Nível 2") or "").strip()
         if not dept:
             continue
+        v  = round(_float(r.get("_m0", "0")), 2)
+        nc = int(_float(r.get("_m2", "0")))
+        mp = round(meta_p.get((dept, secao), 0), 2)
+        mm = meta_mes.get((dept, secao), 0)
         deps[dept].append({
-            "secao":        secao,
-            "venda":        round(_float(r.get("_m0", "0")), 2),
-            "margem_pdv":   round(_float(r.get("_m1", "0")), 2),
-            "nro_clientes": int(_float(r.get("_m2", "0"))),
+            "secao":         secao,
+            "meta_venda":    mp,
+            "venda":         v,
+            "desvio":        round(v - mp, 2),
+            "ating":         round(v / mp * 100, 2) if mp > 0 else 0,
+            "margem_pdv":    round(_float(r.get("_m1", "0")), 2),
+            "nro_clientes":  nc,
+            "ticket_medio":  round(v / nc, 2) if nc > 0 else 0,
+            "prog_venda_ml": _prog(v, mm),
         })
 
     result = []
     for dept in sorted(deps):
-        slist     = sorted(deps[dept], key=lambda x: x["secao"])
-        venda     = round(sum(s["venda"]      for s in slist), 2)
-        meta      = round(meta_dept.get(dept, 0), 2)
+        slist  = sorted(deps[dept], key=lambda x: x["secao"])
+        venda  = round(sum(s["venda"]      for s in slist), 2)
+        meta   = round(sum(s["meta_venda"] for s in slist), 2)
+        mm_d   = sum(meta_mes.get((dept, s["secao"]), 0) for s in slist)
+        nc     = sum(s["nro_clientes"] for s in slist)
         result.append({
-            "departamento": dept,
-            "meta_venda":   meta,
-            "venda":        venda,
-            "desvio":       round(venda - meta, 2),
-            "ating":        round(venda / meta * 100, 2) if meta > 0 else 0,
-            "margem_pdv":   round(sum(s["margem_pdv"]   for s in slist), 2),
-            "nro_clientes": sum(s["nro_clientes"]        for s in slist),
-            "secoes":       slist,
+            "departamento":  dept,
+            "meta_venda":    meta,
+            "venda":         venda,
+            "desvio":        round(venda - meta, 2),
+            "ating":         round(venda / meta * 100, 2) if meta > 0 else 0,
+            "margem_pdv":    round(sum(s["margem_pdv"] for s in slist), 2),
+            "nro_clientes":  nc,
+            "ticket_medio":  round(venda / nc, 2) if nc > 0 else 0,
+            "prog_venda_ml": _prog(venda, mm_d),
+            "secoes":        slist,
         })
 
     payload = {"empresa": empresa, "data": result}

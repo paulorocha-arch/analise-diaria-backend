@@ -1145,6 +1145,8 @@ function renderDrill(empId, lojaRow, deptData) {
     var dVenda = dept.venda       || 0;
     var dDesvio = dept.desvio != null ? dept.desvio : (dVenda - dMeta);
     var dAting  = dept.ating  != null ? dept.ating  : (dMeta > 0 ? dVenda / dMeta * 100 : 0);
+    var dTM     = dept.ticket_medio  || 0;
+    var dProg   = dept.prog_venda_ml || 0;
     deptTr.innerHTML =
       '<td>' +
         '<button class="btn-drill" id="drill-dept-' + deptKey + '" ' +
@@ -1157,9 +1159,9 @@ function renderDrill(empId, lojaRow, deptData) {
       '<td class="num ' + (dDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(dDesvio) + '</td>' +
       '<td class="num">' + Number(dept.nro_clientes).toLocaleString('pt-BR') + '</td>' +
       '<td class="num">—</td>' +
+      '<td class="num">' + fmtMoeda(dTM) + '</td>' +
       '<td class="num">—</td>' +
-      '<td class="num">—</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num ' + pctClass(dProg) + '">' + fmtPct(dProg) + '</td>' +
       '<td class="num ' + pctClass(dAting) + '">' + fmtPct(dAting) + '</td>';
 
     // Guarda seções no dataset para acesso rápido
@@ -1189,17 +1191,23 @@ function toggleSecoes(deptKey, btn) {
     var tr = document.createElement('tr');
     tr.className = 'secao-row';
     tr.setAttribute('data-secao-parent', deptKey);
+    var sMeta   = s.meta_venda    || 0;
+    var sVenda  = s.venda         || 0;
+    var sDesvio = s.desvio != null ? s.desvio : (sVenda - sMeta);
+    var sAting  = s.ating  != null ? s.ating  : (sMeta > 0 ? sVenda / sMeta * 100 : 0);
+    var sTM     = s.ticket_medio  || 0;
+    var sProg   = s.prog_venda_ml || 0;
     tr.innerHTML =
       '<td>' + (s.secao || '—') + '</td>' +
-      '<td class="num">—</td>' +
-      '<td class="num">' + fmtMoeda(s.venda) + '</td>' +
-      '<td class="num">—</td>' +
+      '<td class="num">' + fmtMoeda(sMeta) + '</td>' +
+      '<td class="num">' + fmtMoeda(sVenda) + '</td>' +
+      '<td class="num ' + (sDesvio >= 0 ? 'ok' : 'bad') + '">' + fmtMoeda(sDesvio) + '</td>' +
       '<td class="num">' + Number(s.nro_clientes).toLocaleString('pt-BR') + '</td>' +
       '<td class="num">—</td>' +
+      '<td class="num">' + fmtMoeda(sTM) + '</td>' +
       '<td class="num">—</td>' +
-      '<td class="num">—</td>' +
-      '<td class="num">—</td>' +
-      '<td class="num">—</td>';
+      '<td class="num ' + pctClass(sProg) + '">' + fmtPct(sProg) + '</td>' +
+      '<td class="num ' + pctClass(sAting) + '">' + fmtPct(sAting) + '</td>';
     insertAfter.after(tr);
     insertAfter = tr;
   });
