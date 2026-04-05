@@ -223,7 +223,12 @@
       padding: 20px 20px 16px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
       display: flex; flex-direction: column; gap: 0;
+      border-top: 5px solid transparent;
     }
+    .kpi-card.kpi-venda   { border-top-color: #2980b9; box-shadow: 0 4px 16px rgba(41,128,185,0.15); }
+    .kpi-card.kpi-clientes{ border-top-color: #27ae60; box-shadow: 0 4px 16px rgba(39,174,96,0.15); }
+    .kpi-card.kpi-margem  { border-top-color: #e74c3c; box-shadow: 0 4px 16px rgba(231,76,60,0.15); }
+    .kpi-card.kpi-quebra  { border-top-color: #e67e22; box-shadow: 0 4px 16px rgba(230,126,34,0.15); }
     .kpi-label { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
     .kpi-value { font-size: 28px; font-weight: 700; color: #1a1a2e; line-height: 1; margin-bottom: 14px; }
     .kpi-rows { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #f0f0f0; padding-top: 12px; }
@@ -572,7 +577,7 @@
     <div class="kpi-grid" id="kpi-grid">
 
       <!-- Card 1: Venda -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-venda">
         <div class="kpi-label">Venda</div>
         <div class="kpi-value" id="kpi-venda">—</div>
         <div class="kpi-rows">
@@ -592,7 +597,7 @@
       </div>
 
       <!-- Card 2: Clientes -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-clientes">
         <div class="kpi-label">Clientes</div>
         <div class="kpi-value" id="kpi-clientes">—</div>
         <div class="kpi-rows">
@@ -612,7 +617,7 @@
       </div>
 
       <!-- Card 3: Margem R$ -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-margem">
         <div class="kpi-label">Margem R$</div>
         <div class="kpi-value" id="kpi-margem">—</div>
         <div class="kpi-rows">
@@ -632,7 +637,7 @@
       </div>
 
       <!-- Card 4: Quebra R$ -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-quebra">
         <div class="kpi-label">Quebra R$</div>
         <div class="kpi-value" id="kpi-quebra">—</div>
         <div class="kpi-rows">
