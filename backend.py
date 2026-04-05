@@ -611,6 +611,7 @@ def api_vendas():
 def api_vendas_drill():
     """
     Retorna detalhamento de uma loja por Departamento > Seção.
+    Lê do Firestore (farol_granular) — muito mais rápido que Qlik para drill.
     Parâmetros: empresa, ano, mes, dia_ini, dia_fim, compradores, departamentos, secoes.
     """
     body          = request.json or {}
@@ -619,9 +620,9 @@ def api_vendas_drill():
     mes           = int(body.get("mes",  datetime.now().month))
     dia_ini       = int(body.get("dia_ini", 1))
     dia_fim       = int(body.get("dia_fim", datetime.now().day - 1))
-    compradores_f = body.get("compradores",   [])
-    departamentos = body.get("departamentos", [])
-    secoes_f      = body.get("secoes",        [])
+    compradores_f = set(body.get("compradores",   []))
+    departamentos = set(body.get("departamentos", []))
+    secoes_f      = set(body.get("secoes",        []))
 
     if not empresa:
         return jsonify({"error": "empresa obrigatória"}), 400
@@ -638,50 +639,55 @@ def api_vendas_drill():
     if mem:
         return jsonify(mem)
 
-    ma    = _mes_ano(ano, mes)
-    days  = _days(dia_ini, dia_fim)
-    extra = _set_extra(compradores_f, departamentos, secoes_f)
-    emp_filter = f",Empresa={{'{empresa}'}}"
-    set_v = (f"{{<FlagFatosVendas={{1}},[Mês/Ano]={{'{ma}'}},"
-             f"Dia={{{days}}}{extra}{emp_filter}}}")
-
+    # ── Leitura do Firestore ─────────────────────────────────────────────────
     try:
-        rows = _run_async(_hypercube(
-            APP_FAROL,
-            ["Nível 1", "Nível 2"],
-            [
-                f"Sum({set_v} #Medida1)",
-                f"Sum({set_v} #Medida2)",
-                f"Count({set_v} Distinct ChaveNF)",
-            ],
-            rows=2000,
-        ))
+        rows = _ler_farol("farol_granular", ano, mes, dia_ini, dia_fim)
     except Exception as e:
-        return jsonify({"error": f"Qlik: {e}"}), 500
+        return jsonify({"error": f"Firestore: {e}"}), 500
 
+    if not rows:
+        return jsonify({"empresa": empresa, "data": []})
+
+    # ── Filtros ──────────────────────────────────────────────────────────────
+    rows = [r for r in rows if r.get("empresa") == empresa]
+    if compradores_f:
+        rows = [r for r in rows if r.get("comprador") in compradores_f]
+    if departamentos:
+        rows = [r for r in rows if r.get("departamento") in departamentos]
+    if secoes_f:
+        rows = [r for r in rows if r.get("secao") in secoes_f]
+
+    # ── Agrupar por Departamento > Seção ─────────────────────────────────────
     from collections import defaultdict
-    deps = defaultdict(list)
+    deps = defaultdict(lambda: defaultdict(
+        lambda: {"venda": 0.0, "margem_pdv": 0.0, "nro_clientes": 0}
+    ))
     for r in rows:
-        dept  = r.get("Nível 1", "").strip()
-        secao = r.get("Nível 2", "").strip()
+        dept  = (r.get("departamento") or "").strip()
+        secao = (r.get("secao")        or "").strip()
         if not dept:
             continue
-        deps[dept].append({
-            "secao":        secao,
-            "venda":        round(_float(r.get("_m0", "0")), 2),
-            "margem_pdv":   round(_float(r.get("_m1", "0")), 2),
-            "nro_clientes": int(_float(r.get("_m2", "0"))),
-        })
+        deps[dept][secao]["venda"]        += r.get("venda",        0)
+        deps[dept][secao]["margem_pdv"]   += r.get("margem_pdv",   0)
+        deps[dept][secao]["nro_clientes"] += r.get("nro_clientes", 0)
 
     result = []
     for dept in sorted(deps):
-        slist = sorted(deps[dept], key=lambda x: x["secao"])
+        secoes_list = []
+        for secao in sorted(deps[dept]):
+            s = deps[dept][secao]
+            secoes_list.append({
+                "secao":        secao,
+                "venda":        round(s["venda"],      2),
+                "margem_pdv":   round(s["margem_pdv"], 2),
+                "nro_clientes": s["nro_clientes"],
+            })
         result.append({
             "departamento": dept,
-            "venda":        round(sum(s["venda"]        for s in slist), 2),
-            "margem_pdv":   round(sum(s["margem_pdv"]   for s in slist), 2),
-            "nro_clientes": sum(s["nro_clientes"] for s in slist),
-            "secoes":       slist,
+            "venda":        round(sum(s["venda"]        for s in secoes_list), 2),
+            "margem_pdv":   round(sum(s["margem_pdv"]   for s in secoes_list), 2),
+            "nro_clientes": sum(s["nro_clientes"]        for s in secoes_list),
+            "secoes":       secoes_list,
         })
 
     payload = {"empresa": empresa, "data": result}
