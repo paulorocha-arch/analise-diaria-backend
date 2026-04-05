@@ -834,6 +834,13 @@ const DD_DATA = {
   comprador:    { all: [], selected: new Set() },
 };
 
+// Lista vazia = todos selecionados (sem filtro). Lista preenchida = subconjunto aplicado.
+function sel(name) {
+  var d = DD_DATA[name];
+  return (d.selected.size === d.all.length || d.all.length === 0)
+    ? [] : Array.from(d.selected);
+}
+
 function initDD(name, items) {
   DD_DATA[name].all = items;
   DD_DATA[name].selected = new Set(items);
@@ -960,12 +967,6 @@ function carregarDados() {
   const diaIni  = rangeStart ? rangeStart.getDate() : 1;
   const diaFim  = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
 
-  // Lista vazia = todos selecionados (sem filtro). Lista preenchida = subconjunto aplicado.
-  const sel = function(name) {
-    var d = DD_DATA[name];
-    return (d.selected.size === d.all.length || d.all.length === 0)
-      ? [] : Array.from(d.selected);
-  };
   const bandeiras     = sel('bandeira');
   const empresas      = sel('empresa');
   const compradores_f = sel('comprador');
