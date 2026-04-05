@@ -246,16 +246,17 @@
       background: #fff;
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      overflow: hidden;
+      overflow-x: auto;          /* scroll horizontal em telas pequenas */
       margin-bottom: 24px;
     }
     .table-card table {
       width: 100%; border-collapse: collapse;
       font-size: 13px;
+      min-width: 900px;          /* garante que não comprime demais */
     }
     .table-card thead tr { background: #f8f9fb; }
     .table-card thead th {
-      padding: 12px 16px; text-align: left;
+      padding: 10px 14px; text-align: left;
       font-size: 11px; font-weight: 700; color: #888;
       text-transform: uppercase; letter-spacing: 0.5px;
       border-bottom: 1px solid #f0f0f0;
@@ -265,8 +266,13 @@
     .table-card tbody tr { transition: background .12s; }
     .table-card tbody tr:hover { background: #f8f9fb; }
     .table-card tbody td {
-      padding: 12px 16px; color: #333;
+      padding: 10px 14px; color: #333;
       border-bottom: 1px solid #f7f7f7;
+      white-space: nowrap;       /* impede quebra de linha em qualquer célula */
+    }
+    .table-card tbody td:first-child {
+      white-space: nowrap;
+      min-width: 130px;
     }
     .table-card tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .table-card tbody tr:last-child td { border-bottom: none; }
@@ -1039,51 +1045,59 @@ function carregarDados() {
 var _drillCache = {};   // empresa → {data:[...]}
 var _drillOpen  = {};   // empresa → bool
 
+function _findLojaRow(empresa) {
+  // Busca por todos os tr.loja-row comparando o atributo diretamente
+  var rows = document.querySelectorAll('tr.loja-row');
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].getAttribute('data-emp') === empresa) return rows[i];
+  }
+  return null;
+}
+
 function toggleDrill(empresa, btn) {
-  var empId = empresa.replace(/[^a-zA-Z0-9]/g, '_');
+  var empId  = empresa.replace(/[^a-zA-Z0-9]/g, '_');
   var isOpen = btn.classList.toggle('open');
 
-  // Remove linhas existentes de drill para esta empresa
+  // Remove linhas existentes de drill desta empresa
   document.querySelectorAll('[data-drill-parent="' + empId + '"]').forEach(function(tr) {
     tr.remove();
   });
 
-  if (!isOpen) return;  // fechou — só remover
+  if (!isOpen) return;
 
-  // Linha âncora (a loja)
-  var anchor = document.querySelector('tr.loja-row[data-emp="' + empresa + '"]');
+  var anchor = _findLojaRow(empresa);
   if (!anchor) return;
 
-  // Mostra spinner de loading
+  // Spinner de loading
   var loadTr = document.createElement('tr');
   loadTr.className = 'drill-loading';
   loadTr.setAttribute('data-drill-parent', empId);
   loadTr.innerHTML = '<td colspan="10"><span class="spinner-inline"></span>Carregando departamentos...</td>';
   anchor.after(loadTr);
 
-  // Usa cache se disponível
+  // Cache
   if (_drillCache[empresa]) {
     loadTr.remove();
-    renderDrill(empresa, empId, anchor, _drillCache[empresa]);
+    renderDrill(empId, anchor, _drillCache[empresa]);
     return;
   }
 
-  // Monta parâmetros com os filtros ativos atuais
   var ano    = rangeStart ? rangeStart.getFullYear()   : new Date().getFullYear();
   var mes    = rangeStart ? rangeStart.getMonth() + 1  : new Date().getMonth() + 1;
-  var diaIni = rangeStart ? rangeStart.getDate() : 1;
-  var diaFim = (rangeEnd || rangeStart) ? (rangeEnd || rangeStart).getDate() : new Date().getDate() - 1;
-  var compradores_f = sel('comprador');
-  var departamentos = sel('departamento');
-  var secoes        = sel('secao');
+  var diaIni = rangeStart ? rangeStart.getDate()       : 1;
+  var diaFim = (rangeEnd || rangeStart)
+               ? (rangeEnd || rangeStart).getDate()
+               : new Date().getDate() - 1;
 
   fetch(BACKEND_URL + '/api/vendas/drill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      empresa: empresa,
+      empresa:       empresa,
       ano: ano, mes: mes, dia_ini: diaIni, dia_fim: diaFim,
-      compradores: compradores_f, departamentos: departamentos, secoes: secoes
+      compradores:   sel('comprador'),
+      departamentos: sel('departamento'),
+      secoes:        sel('secao'),
     })
   })
   .then(function(r) { return r.json(); })
@@ -1097,21 +1111,28 @@ function toggleDrill(empresa, btn) {
       anchor.after(errTr);
       return;
     }
+    if (!resp.data || resp.data.length === 0) {
+      var emptyTr = document.createElement('tr');
+      emptyTr.className = 'drill-loading';
+      emptyTr.setAttribute('data-drill-parent', empId);
+      emptyTr.innerHTML = '<td colspan="10" style="color:#aaa;">Sem detalhamento disponível para este período.</td>';
+      anchor.after(emptyTr);
+      return;
+    }
     _drillCache[empresa] = resp.data;
-    renderDrill(empresa, empId, anchor, resp.data);
+    renderDrill(empId, anchor, resp.data);
   })
   .catch(function(err) {
     loadTr.remove();
     var errTr = document.createElement('tr');
     errTr.className = 'drill-loading';
     errTr.setAttribute('data-drill-parent', empId);
-    errTr.innerHTML = '<td colspan="10" style="color:#e74c3c;">Erro: ' + err.message + '</td>';
+    errTr.innerHTML = '<td colspan="10" style="color:#e74c3c;">Erro ao conectar: ' + err.message + '</td>';
     anchor.after(errTr);
   });
 }
 
-function renderDrill(empresa, empId, lojaRow, deptData) {
-  // Insere dept rows após a linha da loja (em ordem reversa para manter sequência)
+function renderDrill(empId, lojaRow, deptData) {
   var insertAfter = lojaRow;
   deptData.forEach(function(dept) {
     var deptKey = empId + '_' + dept.departamento.replace(/[^a-zA-Z0-9]/g, '_');
