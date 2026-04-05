@@ -662,6 +662,7 @@ def api_vendas():
             v_p  = _float(r.get("_m1", "0"))
             prev_map[emp] = {
                 "nro_clientes": nc_p,
+                "venda":        v_p,
                 "ticket_medio": round(v_p / nc_p, 2) if nc_p > 0 else 0,
             }
 
@@ -688,15 +689,13 @@ def api_vendas():
         p     = prev_map.get(emp, {})
         nc_p  = p.get("nro_clientes", 0)
         tm_p  = p.get("ticket_medio", 0)
+        v_p   = p.get("venda", 0)
 
-        ating      = round(va / ma_v  * 100, 2) if ma_v  > 0 else 0
-        ating_mrg  = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
-        prog_venda = round(va / dias_passados * dias_no_mes / m_mes * 100, 2) \
-                     if m_mes > 0 and dias_passados > 0 else 0
-        prog_cl_ml = round(nc  / nc_p * 100, 2) if nc_p > 0 else 0
-        prog_tm_ml = round(tm  / tm_p * 100, 2) if tm_p > 0 else 0
-        cresc_cl   = round((nc  / nc_p - 1) * 100, 2) if nc_p > 0 else 0
-        cresc_tm   = round((tm  / tm_p - 1) * 100, 2) if tm_p > 0 else 0
+        ating         = round(va / ma_v  * 100, 2) if ma_v  > 0 else 0
+        ating_mrg     = round(mrg / m_mrg * 100, 2) if m_mrg > 0 else 0
+        prog_venda_ml = round((va / v_p  - 1) * 100, 2) if v_p  > 0 else 0
+        prog_cl_ml    = round((nc / nc_p - 1) * 100, 2) if nc_p > 0 else 0
+        prog_tm_ml    = round((tm / tm_p - 1) * 100, 2) if tm_p > 0 else 0
 
         rows_out.append({
             "empresa":       emp,
@@ -708,10 +707,8 @@ def api_vendas():
             "prog_cl_ml":    prog_cl_ml,
             "ticket_medio":  tm,
             "prog_tm_ml":    prog_tm_ml,
-            "prog_venda_ml": prog_venda,
+            "prog_venda_ml": prog_venda_ml,
             "ating":         ating,
-            "cresc_cl":      cresc_cl,
-            "cresc_tm":      cresc_tm,
             "margem_pdv":    round(mrg,  2),
             "meta_margem":   round(m_mrg, 2),
             "ating_margem":  ating_mrg,
@@ -731,10 +728,9 @@ def api_vendas():
     tot_mrg  = _s("margem_pdv")
     tot_mmrg = _s("meta_margem")
     tot_tm   = round(tot_va / tot_nc, 2) if tot_nc > 0 else 0
-    tot_mmes = sum(m.get("meta_venda_mes", 0) for m in agg_m.values())
     tot_nc_p = sum(p.get("nro_clientes", 0) for p in prev_map.values())
-    tot_tm_p = round(sum(p.get("nro_clientes",0)*p.get("ticket_medio",0)
-                         for p in prev_map.values()) / tot_nc_p, 2) if tot_nc_p > 0 else 0
+    tot_va_p = sum(p.get("venda", 0) for p in prev_map.values())
+    tot_tm_p = round(tot_va_p / tot_nc_p, 2) if tot_nc_p > 0 else 0
 
     totais = {
         "venda":         tot_va,
@@ -748,12 +744,9 @@ def api_vendas():
         "meta_quebra":   0,
         "ating":         round(tot_va / tot_ma  * 100, 2) if tot_ma  > 0 else 0,
         "ating_margem":  round(tot_mrg / tot_mmrg * 100, 2) if tot_mmrg > 0 else 0,
-        "prog_venda_ml": round(tot_va / dias_passados * dias_no_mes / tot_mmes * 100, 2)
-                         if tot_mmes > 0 and dias_passados > 0 else 0,
-        "prog_cl_ml":    round(tot_nc  / tot_nc_p * 100, 2) if tot_nc_p > 0 else 0,
-        "prog_tm_ml":    round(tot_tm  / tot_tm_p * 100, 2) if tot_tm_p > 0 else 0,
-        "cresc_cl":      round((tot_nc / tot_nc_p - 1) * 100, 2) if tot_nc_p > 0 else 0,
-        "cresc_tm":      round((tot_tm / tot_tm_p - 1) * 100, 2) if tot_tm_p > 0 else 0,
+        "prog_venda_ml": round((tot_va / tot_va_p - 1) * 100, 2) if tot_va_p > 0 else 0,
+        "prog_cl_ml":    round((tot_nc / tot_nc_p - 1) * 100, 2) if tot_nc_p > 0 else 0,
+        "prog_tm_ml":    round((tot_tm / tot_tm_p - 1) * 100, 2) if tot_tm_p > 0 else 0,
     }
 
     payload = {
