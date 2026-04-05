@@ -662,7 +662,7 @@
   const db    = getFirestore(fbApp);
 
   // Verifica sessão local
-  const authUser = sessionStorage.getItem('auth_user');
+  const authUser = localStorage.getItem('auth_user');
   if (!authUser) {
     window.location.href = 'index.html';
   } else {
@@ -672,7 +672,7 @@
   }
 
   document.getElementById('btn-logout').addEventListener('click', () => {
-    sessionStorage.removeItem('auth_user');
+    localStorage.removeItem('auth_user');
     window.location.href = 'index.html';
   });
 

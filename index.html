@@ -312,7 +312,7 @@
     setLoading(true);
     const hash = await sha256(senha);
     if (USUARIOS[email] && USUARIOS[email] === hash) {
-      sessionStorage.setItem('auth_user', email);
+      localStorage.setItem('auth_user', email);
       window.location.href = 'dashboard.html';
     } else {
       showError('E-mail ou senha incorretos.');
