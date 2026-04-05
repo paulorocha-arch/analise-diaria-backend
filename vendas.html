@@ -139,6 +139,9 @@
     .dd-item:hover { background: #f5f7fa; }
     .dd-item.selected { color: #2980b9; font-weight: 600; }
     .dd-item.select-all { font-weight: 700; color: #1a1a2e; border-bottom: 1px solid #f0f0f0; margin-bottom: 4px; }
+    .dd-item.disabled { color: #bbb; cursor: not-allowed; pointer-events: none; }
+    .dd-item.disabled .dd-checkbox { border-color: #ddd; background: #f5f5f5; }
+    .dd-item.disabled:hover { background: transparent; }
 
     .dd-checkbox {
       width: 16px; height: 16px; border-radius: 4px;
@@ -856,6 +859,27 @@ const DD_DATA = {
   comprador:    { all: [], selected: new Set() },
 };
 
+// Mapeamento departamento → { secoes, compradores } (carregado do backend)
+var DEPT_MAP = {};
+
+// Retorna Set de itens permitidos para 'secao' ou 'comprador' com base nos
+// departamentos selecionados. Retorna null se todos são permitidos.
+function getAllowed(name) {
+  if (!DEPT_MAP || Object.keys(DEPT_MAP).length === 0) return null;
+  const dDados = DD_DATA['departamento'];
+  const depsAtivas = (dDados.selected.size === dDados.all.length || dDados.selected.size === 0)
+    ? null : Array.from(dDados.selected);
+  if (!depsAtivas) return null;
+  const key = name === 'secao' ? 'secoes' : 'compradores';
+  const allowed = new Set();
+  depsAtivas.forEach(function(dep) {
+    if (DEPT_MAP[dep] && DEPT_MAP[dep][key]) {
+      DEPT_MAP[dep][key].forEach(function(v) { allowed.add(v); });
+    }
+  });
+  return allowed;
+}
+
 // Lista vazia = todos selecionados (sem filtro). Lista preenchida = subconjunto aplicado.
 function sel(name) {
   var d = DD_DATA[name];
@@ -884,11 +908,16 @@ function renderDD(name, search) {
   allItem.onclick = function(e) { e.stopPropagation(); toggleAll(name); };
   list.appendChild(allItem);
 
+  const allowed = (name === 'secao' || name === 'comprador') ? getAllowed(name) : null;
+
   filtered.forEach(function(item) {
+    const isDisabled = allowed !== null && !allowed.has(item);
     const el = document.createElement('div');
-    el.className = 'dd-item' + (d.selected.has(item) ? ' selected' : '');
+    el.className = 'dd-item' + (d.selected.has(item) ? ' selected' : '') + (isDisabled ? ' disabled' : '');
     el.innerHTML = '<div class="dd-checkbox"></div><span>' + item + '</span>';
-    el.onclick = function(e) { e.stopPropagation(); toggleItem(name, item); };
+    if (!isDisabled) {
+      el.onclick = function(e) { e.stopPropagation(); toggleItem(name, item); };
+    }
     list.appendChild(el);
   });
 
@@ -951,6 +980,31 @@ document.addEventListener('click', function(e) {
   if (!e.target.closest('.filter-btn') && !e.target.closest('.filter-dropdown') && !e.target.closest('.cal-dropdown')) {
     closeAllDropdowns();
   }
+});
+
+/* Ao mudar departamento: remove seções/compradores fora do escopo e re-renderiza */
+window.addEventListener('filtro:departamento', function() {
+  ['secao', 'comprador'].forEach(function(name) {
+    const allowed = getAllowed(name);
+    if (allowed !== null) {
+      const d = DD_DATA[name];
+      d.selected.forEach(function(item) {
+        if (!allowed.has(item)) d.selected.delete(item);
+      });
+      // Se nenhum ficou selecionado, seleciona todos os permitidos
+      if (d.selected.size === 0) {
+        d.all.forEach(function(item) { if (allowed.has(item)) d.selected.add(item); });
+      }
+      renderDD(name);
+      updateDDLabel(name);
+    } else {
+      // Nenhum departamento selecionado: restaura todos
+      const d = DD_DATA[name];
+      d.all.forEach(function(item) { d.selected.add(item); });
+      renderDD(name);
+      updateDDLabel(name);
+    }
+  });
 });
 
 /* DADOS — escuta eventos dos filtros */
@@ -1319,6 +1373,25 @@ initDD('comprador',    FILTROS_FIXOS.compradores);
   const tbody = document.getElementById('tabela-lojas');
   tbody.innerHTML = '<tr class="loading-row"><td colspan="10"><span class="spinner-inline"></span>Iniciando servidor...</td></tr>';
   let acordado = false;
+
+  // Carrega mapa dept→seções/compradores em background
+  fetch(BACKEND_URL + '/api/mapa-filtros')
+    .then(function(r) { return r.json(); })
+    .then(function(m) {
+      if (!m.error) {
+        var DEPS_EXCLUIR = ['A CLASSIFICAR', 'DESPESAS'];
+        var SECOES_EXCLUIR = ['ALMOXARIFADO','CONSUMO LOJA','EMBALAGENS E INSUMOS','FAMILIAS','IMOBILIZADO','INSUMO E MATERIA PRIMA'];
+        var COMP_EXCLUIR  = ['MONICA NAYARA DE MATOS'];
+        Object.keys(m).forEach(function(dep) {
+          if (DEPS_EXCLUIR.indexOf(dep) !== -1) return;
+          DEPT_MAP[dep] = {
+            secoes:      (m[dep].secoes      || []).filter(function(s){ return SECOES_EXCLUIR.indexOf(s) === -1; }),
+            compradores: (m[dep].compradores || []).filter(function(c){ return COMP_EXCLUIR.indexOf(c) === -1; })
+          };
+        });
+      }
+    })
+    .catch(function() {});
 
   // Carrega todos os filtros do backend (incluindo empresas) e depois carrega os dados
   function atualizarFiltros(callback) {

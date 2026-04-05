@@ -564,6 +564,47 @@ def api_filtros():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/mapa-filtros")
+def api_mapa_filtros():
+    """Retorna mapeamento departamento → seções e departamento → compradores."""
+    mem = _mem_get("__mapa_filtros__")
+    if mem:
+        return jsonify(mem)
+
+    try:
+        rows_ds, rows_dc = _run_async_all(
+            _hypercube(APP_FAROL, ["Nível 1", "Nível 2"],   [], rows=2000),
+            _hypercube(APP_FAROL, ["Nível 1", "Comprador"], [], rows=5000),
+        )
+
+        mapa = {}
+        for r in rows_ds:
+            dep = r.get("Nível 1", "")
+            sec = r.get("Nível 2", "")
+            if dep and sec and dep not in ("-", "") and sec not in ("-", ""):
+                mapa.setdefault(dep, {"secoes": [], "compradores": []})
+                if sec not in mapa[dep]["secoes"]:
+                    mapa[dep]["secoes"].append(sec)
+
+        for r in rows_dc:
+            dep  = r.get("Nível 1", "")
+            comp = r.get("Comprador", "")
+            if dep and comp and dep not in ("-", "") and comp not in ("-", "", "NÃO IDENTIFICADO"):
+                mapa.setdefault(dep, {"secoes": [], "compradores": []})
+                if comp not in mapa[dep]["compradores"]:
+                    mapa[dep]["compradores"].append(comp)
+
+        for dep in mapa:
+            mapa[dep]["secoes"].sort()
+            mapa[dep]["compradores"].sort()
+
+        _mem_set("__mapa_filtros__", mapa)
+        return jsonify(mapa)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Leitura das coleções farol_* do Firestore ────────────────────────────────
 
 def _ler_farol(colecao: str, ano: int, mes: int, dia_ini: int, dia_fim: int) -> list:
