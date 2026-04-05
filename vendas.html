@@ -233,6 +233,11 @@
     .kpi-row-val.ok   { color: #27ae60; }
     .kpi-row-val.warn { color: #e67e22; }
     .kpi-row-val.bad  { color: #e74c3c; }
+    td.ok   { color: #27ae60; font-weight: 600; }
+    td.bad  { color: #e74c3c; font-weight: 600; }
+    td.warn { color: #e67e22; font-weight: 600; }
+    td.ating-ok  { color: #00c8ff; font-weight: 700; }
+    td.ating-bad { color: #ff1744; font-weight: 700; }
 
     /* SECTION TITLE */
     .section-header {
@@ -952,9 +957,10 @@ function fmtTicket(v) {
   return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function pctClass(v) {
-  if (v >= 100) return 'ok';
-  if (v >= 80)  return 'warn';
-  return 'bad';
+  return v >= 0 ? 'ok' : 'bad';
+}
+function atingClass(v) {
+  return v >= 100 ? 'ating-ok' : 'ating-bad';
 }
 function pctColor(v) {
   if (v >= 100) return '#27ae60';
@@ -1033,7 +1039,7 @@ function carregarDados() {
       '<td class="num"><strong>' + fmtTicket(t.ticket_medio) + '</strong></td>' +
       '<td class="num ' + (t.prog_tm_ml >= 0 ? 'ok' : 'bad') + '"><strong>' + fmtPct(t.prog_tm_ml) + '</strong></td>' +
       '<td class="num ' + pctClass(t.prog_venda_ml) + '"><strong>' + fmtPct(t.prog_venda_ml) + '</strong></td>' +
-      '<td class="num ' + pctClass(t.ating) + '"><strong>' + fmtPct(t.ating) + '</strong></td>' +
+      '<td class="num ' + atingClass(t.ating) + '"><strong>' + fmtPct(t.ating) + '</strong></td>' +
       '</tr>';
     tbody.innerHTML = totalRow + rows.map(function(r) {
       var empId = r.empresa.replace(/[^a-zA-Z0-9]/g, '_');
@@ -1052,7 +1058,7 @@ function carregarDados() {
         '<td class="num">' + fmtTicket(r.ticket_medio) + '</td>' +
         '<td class="num ' + (r.prog_tm_ml >= 0 ? 'ok' : 'bad') + '">' + fmtPct(r.prog_tm_ml) + '</td>' +
         '<td class="num ' + pctClass(r.prog_venda_ml) + '">' + fmtPct(r.prog_venda_ml) + '</td>' +
-        '<td class="num ' + pctClass(r.ating) + '">' + fmtPct(r.ating) + '</td>' +
+        '<td class="num ' + atingClass(r.ating) + '">' + fmtPct(r.ating) + '</td>' +
         '</tr>';
     }).join('');
   })
@@ -1181,7 +1187,7 @@ function renderDrill(empId, lojaRow, deptData) {
       '<td class="num">' + fmtTicket(dTM) + '</td>' +
       '<td class="num ' + (dept.prog_tm_ml != null ? (dept.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (dept.prog_tm_ml != null ? fmtPct(dept.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(dProg) + '">' + fmtPct(dProg) + '</td>' +
-      '<td class="num ' + pctClass(dAting) + '">' + fmtPct(dAting) + '</td>';
+      '<td class="num ' + atingClass(dAting) + '">' + fmtPct(dAting) + '</td>';
 
     // Guarda seções no dataset para acesso rápido
     deptTr.dataset.secoes = JSON.stringify(dept.secoes);
@@ -1226,7 +1232,7 @@ function toggleSecoes(deptKey, btn) {
       '<td class="num">' + fmtTicket(sTM) + '</td>' +
       '<td class="num ' + (s.prog_tm_ml != null ? (s.prog_tm_ml >= 0 ? 'ok' : 'bad') : '') + '">' + (s.prog_tm_ml != null ? fmtPct(s.prog_tm_ml) : '—') + '</td>' +
       '<td class="num ' + pctClass(sProg) + '">' + fmtPct(sProg) + '</td>' +
-      '<td class="num ' + pctClass(sAting) + '">' + fmtPct(sAting) + '</td>';
+      '<td class="num ' + atingClass(sAting) + '">' + fmtPct(sAting) + '</td>';
     insertAfter.after(tr);
     insertAfter = tr;
   });
